@@ -1,0 +1,693 @@
+{
+ "_note": "Starting content from the St Jude prototype. Facility staff must review every entry against local SOPs before relying on it.",
+ "instrument_types": {
+  "tem": "Transmission electron microscope",
+  "fib": "Cryo-FIB / FIB-SEM",
+  "prep": "Sample preparation",
+  "light": "Light microscopy",
+  "other": "Other"
+ },
+ "severities": [
+  {
+   "id": "stop",
+   "label": "Stop now",
+   "desc": "Instrument or specimen may be at risk",
+   "rank": 3,
+   "ack_minutes": 2
+  },
+  {
+   "id": "blocked",
+   "label": "Blocked",
+   "desc": "I cannot continue collecting",
+   "rank": 2,
+   "ack_minutes": 5
+  },
+  {
+   "id": "degraded",
+   "label": "Degraded",
+   "desc": "Collecting, but quality is affected",
+   "rank": 1,
+   "ack_minutes": 10
+  },
+  {
+   "id": "question",
+   "label": "Question",
+   "desc": "Not urgent",
+   "rank": 0,
+   "ack_minutes": 30
+  }
+ ],
+ "resolution_types": [
+  "Fixed by my own checks",
+  "Fixed by staff remotely",
+  "Fixed by staff on site",
+  "Workaround in place",
+  "Stopped on its own, cause unknown",
+  "Referred to vendor service",
+  "Not resolved, session abandoned"
+ ],
+ "root_causes": [
+  "Instrument hardware",
+  "Alignment or calibration",
+  "Acquisition software or settings",
+  "Specimen or grid",
+  "Protocol or user error",
+  "Network, storage or IT",
+  "EMhub or booking",
+  "Unknown"
+ ],
+ "problem_areas": [
+  {
+   "id": "loader",
+   "label": "Autoloader, cassette or grid transfer",
+   "minSeverity": "blocked",
+   "staffOnly": true,
+   "hold": [
+    "Pause the automated run. Do not repeat a failed load, dock or transfer command more than once.",
+    "Do not vent, open hatches, or touch the autoloader or dewars.",
+    "Leave the system in its current state. Staff will decide how to recover."
+   ],
+   "record": [
+    "Exact error text and the time",
+    "The last action you performed",
+    "Cassette position and grid slot involved",
+    "A photo or screenshot of the status screen"
+   ],
+   "symptoms": [
+    {
+     "id": "dock",
+     "label": "Cassette will not dock or undock"
+    },
+    {
+     "id": "inv",
+     "label": "Wrong or missing grid after load"
+    },
+    {
+     "id": "ln2",
+     "label": "Autoloader LN2 or temperature warning",
+     "minSeverity": "stop"
+    },
+    {
+     "id": "stuck",
+     "label": "Grid stuck or dropped during transfer",
+     "minSeverity": "stop"
+    }
+   ]
+  },
+  {
+   "id": "vacuum",
+   "label": "Vacuum, LN2 level or temperature alarm",
+   "minSeverity": "stop",
+   "staffOnly": true,
+   "hold": [
+    "Stop acquisition. Leave the column valves and the screen as they are.",
+    "Do not clear alarms or restart the microscope computer or server.",
+    "Do not refill or change LN2 yourself unless you are trained and the SOP says to."
+   ],
+   "record": [
+    "Alarm text and the time",
+    "Gauge or value shown, if any",
+    "What was happening when it appeared"
+   ],
+   "symptoms": [
+    {
+     "id": "vac",
+     "label": "Column or gun vacuum alarm"
+    },
+    {
+     "id": "ln2l",
+     "label": "LN2 level or refill alarm"
+    },
+    {
+     "id": "temp",
+     "label": "Cryo temperature out of range"
+    }
+   ]
+  },
+  {
+   "id": "beam",
+   "label": "Beam, illumination or alignments",
+   "general": [
+    "Confirm you are on the intended preset (magnification, spot size, C2 intensity) and nothing was changed after the last alignment.",
+    "Confirm the column valves are open and the screen is raised.",
+    "Compare with the facility daily-alignment record. Only redo alignments your training covers."
+   ],
+   "avoid": [
+    "Do not adjust gun settings, the C2 aperture or the objective aperture unless you are trained and authorized."
+   ],
+   "symptoms": [
+    {
+     "id": "lost",
+     "label": "No beam or beam far off-center",
+     "steps": [
+      "Confirm the column valves are open and the viewing screen is raised.",
+      "Check spot size, C2 intensity and magnification against your preset, and return to the preset if they changed.",
+      "Check that the beam is not blanked and that no aperture or beam stop is inserted, using the status indicators in the microscope interface.",
+      "If the beam is still missing, stop. Do not move apertures or gun settings."
+     ]
+    },
+    {
+     "id": "astig",
+     "label": "Beam not round, or it walks when intensity changes",
+     "steps": [
+      "Look at the beam at your acquisition spot size and magnification. Is it elliptical, or does it shift as you change intensity?",
+      "Re-run condenser astigmatism and beam-shift pivot-point alignments only if your facility training covers them.",
+      "If values moved a lot from the last daily-alignment entry, note the numbers for staff."
+     ]
+    },
+    {
+     "id": "coma",
+     "label": "Suspected beam tilt or coma (asymmetric Thon rings)",
+     "steps": [
+      "Acquire a short test exposure on thin ice or carbon at your usual dose and defocus.",
+      "Inspect the Fourier transform for asymmetric or elliptical Thon rings and run a quick CTF fit.",
+      "Compare with a reference exposure from the last staff-verified alignment, if one exists.",
+      "If the rings are asymmetric, ask staff to check coma-free alignment before collecting more."
+     ]
+    },
+    {
+     "id": "dose",
+     "label": "Dose rate unstable or different from expected",
+     "steps": [
+      "Measure the dose rate over an empty hole. Note the value, spot size and C2 aperture in use.",
+      "Measure again after a few minutes. A steady offset points to a settings change. A continuing drift points to source or beam stability, which is a staff matter.",
+      "Change exposure time or dose rate in your protocol only after the value is stable."
+     ]
+    }
+   ],
+   "not_types": [
+    "fib"
+   ]
+  },
+  {
+   "id": "stage",
+   "label": "Stage, eucentric height, focus or tilt tracking",
+   "general": [
+    "Note the position, tilt angle and time when it started.",
+    "Compare the same behavior at a second position to separate a local problem from a global one."
+   ],
+   "avoid": [
+    "Do not restart the stage controller or microscope server in the middle of a run."
+   ],
+   "symptoms": [
+    {
+     "id": "drift",
+     "label": "Image drift or smeared images after stage moves",
+     "steps": [
+      "Wait for the stage to settle, then read the drift value in your software at the same position at two time points.",
+      "If drift falls with time, add a longer settling delay. If it stays high, move to a different grid square and compare.",
+      "High drift in only some squares points to the specimen or grid (for example buckling or an unsupported film). High drift everywhere points to the instrument, or to a recent thermal disturbance such as a cassette load.",
+      "If drift stays high everywhere, report the drift values and positions to staff."
+     ]
+    },
+    {
+     "id": "euc",
+     "label": "Eucentric height failure",
+     "steps": [
+      "Note where it failed: the position, the magnification used for the routine, and the message or value shown.",
+      "Repeat the routine once on a flat, intact square, away from grid bars, broken squares and thick ice. Do not run it repeatedly.",
+      "Check that the routine has something with contrast to follow. An empty hole or featureless ice gives it nothing to track.",
+      "Check the result by tilting a few degrees the way your SOP does. A recognizable feature that stays in place means the height is right. One that walks sideways means it is off.",
+      "Run the routine on two or three neighboring squares and compare the heights. A large jump between neighbors points to an uneven or buckled grid or clip. A steady offset on every square points to the stage or its calibration, which is a staff matter.",
+      "On the cryo-FIB, confirm the stage is at the position your protocol uses before repeating the routine.",
+      "If the height sits at the limit of the stage range, or the routine fails on every grid, stop and call staff. Note the z values you saw."
+     ]
+    },
+    {
+     "id": "af",
+     "label": "Autofocus failing",
+     "steps": [
+      "Check that the autofocus target area is on ice or carbon, not on a grid bar or an empty hole.",
+      "Check the autofocus tolerance and defocus range in your protocol. Very tight tolerances can cause repeated retries.",
+      "Check that eucentric height was set at this position, since a wrong height often shows up as failing autofocus.",
+      "If the focus value sits at the limit of the lens range, stop and call staff."
+     ]
+    },
+    {
+     "id": "track",
+     "label": "Tilt-series tracking lost (cryo-ET)",
+     "steps": [
+      "Open the series and find the tilt angle where tracking failed.",
+      "Check that the tracking and focus area sits on the lamella or specimen, not on a gap, edge or grid bar, especially at high tilt.",
+      "Check that the pretilt setting matches the lamella or grid orientation as loaded.",
+      "If it fails at similar angles at different positions, increase the tracking exposure within your dose budget.",
+      "If the stage itself errors at high tilt, stop and call staff."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "detector",
+   "label": "Detector, gain reference or frame saving",
+   "general": [
+    "Check the camera status in the camera software: inserted or retracted, ready, and connected.",
+    "Acquire one short test exposure in a plain area to see whether it completes."
+   ],
+   "avoid": [
+    "Do not restart the camera server or acquisition computer in the middle of a run without asking staff.",
+    "Do not delete or move existing frames."
+   ],
+   "symptoms": [
+    {
+     "id": "notready",
+     "label": "Camera not ready, not inserting or not acquiring",
+     "steps": [
+      "Check the camera status in the camera software: inserted or retracted, ready, and connected.",
+      "Check that the acquisition software shows the camera as connected, and note the exact message.",
+      "Acquire one short test exposure in a plain area.",
+      "If the test fails, ask staff."
+     ]
+    },
+    {
+     "id": "gain",
+     "label": "Streaks, fixed-pattern noise or an old gain reference",
+     "steps": [
+      "Note the date of the gain reference currently in use.",
+      "Acquire a no-specimen exposure and look for streaks, lines or fixed patterns.",
+      "Acquire a second exposure. A pattern that repeats points to the detector or reference. A pattern that changes points to the specimen or beam.",
+      "If the pattern repeats, ask staff whether a new gain reference is due."
+     ]
+    },
+    {
+     "id": "frames",
+     "label": "Frames not saving, missing files or disk errors",
+     "steps": [
+      "Check free space on the acquisition drive and the destination storage.",
+      "Check that the destination folder is reachable: share mounted, permissions in place.",
+      "Check that frame format and number of fractions match your protocol and your processing plan.",
+      "Note the last micrograph that saved correctly and the time of the first failure."
+     ]
+    }
+   ],
+   "not_types": [
+    "fib"
+   ]
+  },
+  {
+   "id": "filter",
+   "label": "Energy filter or slit",
+   "general": [
+    "Confirm the slit is inserted at the width set in your protocol."
+   ],
+   "symptoms": [
+    {
+     "id": "zlp",
+     "label": "Zero-loss peak drifting or off-center",
+     "steps": [
+      "Confirm the slit is inserted at the width set in your protocol.",
+      "Re-center the zero-loss peak in an empty hole following the facility procedure and note the shift.",
+      "Check again after a while. A large repeated shift tells staff the filter is drifting."
+     ]
+    },
+    {
+     "id": "lowint",
+     "label": "Low or uneven intensity with the slit in",
+     "steps": [
+      "Compare intensity with the slit retracted at the same spot size and exposure.",
+      "Check that the slit is centered on the zero-loss peak and not offset.",
+      "If the image is uneven even when centered, ask staff to check filter tuning."
+     ]
+    },
+    {
+     "id": "tune",
+     "label": "Filter tuning fails",
+     "steps": [
+      "Note the error message and which tuning step failed.",
+      "Do not repeat the tuning more than once. Ask staff."
+     ]
+    }
+   ],
+   "not_types": [
+    "fib"
+   ]
+  },
+  {
+   "id": "software",
+   "label": "Acquisition software (EPU, SerialEM, Tomo5)",
+   "general": [
+    "Take a screenshot of the status or error and note the time.",
+    "Check the software log for the last error line and report it to staff."
+   ],
+   "avoid": [
+    "Pause rather than stop where possible, so your position queue stays intact where the software allows."
+   ],
+   "symptoms": [
+    {
+     "id": "stall",
+     "label": "Acquisition stalls or is stuck on one step",
+     "steps": [
+      "Take a screenshot of the status and note the time.",
+      "Check whether the camera, stage and microscope connections all show as responsive.",
+      "Compare with how long the same step took earlier in this session.",
+      "Pause rather than stop where possible.",
+      "Check the software log for the last error line and report it to staff."
+     ]
+    },
+    {
+     "id": "find",
+     "label": "Hole or square finding fails (EPU)",
+     "steps": [
+      "Check that atlas and square registration look correct on the map.",
+      "Check that hole size and spacing in the template match the grid in use.",
+      "Check ice-thickness or contrast filter thresholds. If they are too strict, most holes are rejected.",
+      "Test on a few holes manually before restarting the run."
+     ]
+    },
+    {
+     "id": "sem",
+     "label": "Script or Navigator error (SerialEM)",
+     "steps": [
+      "Read the last lines in the SerialEM log window and note which script line failed.",
+      "Check that calibrations exist for the magnification, spot size and mode in use.",
+      "After a cassette re-dock or grid reload, check that Navigator items still register to the stage coordinates, and re-register if needed.",
+      "If the script worked earlier in this session, note what changed since then."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "specimen",
+   "label": "Ice, contamination or grid quality",
+   "general": [
+    "Compare several squares across the grid before deciding it is a whole-grid problem.",
+    "Record grid slot and squares examined so staff and your lab can follow up."
+   ],
+   "symptoms": [
+    {
+     "id": "thick",
+     "label": "Ice too thick",
+     "steps": [
+      "Compare ice thickness across squares using the atlas or square images and choose thinner squares.",
+      "If your software has an ice-thickness or contrast filter, apply it to select holes.",
+      "If the whole grid is thick, move to the next grid and note it for your next grid preparation."
+     ]
+    },
+    {
+     "id": "crystal",
+     "label": "Crystalline ice or contamination",
+     "steps": [
+      "Check whether the contamination is on one square, the whole grid, or all grids.",
+      "If it is grid-specific, choose clean squares or another grid.",
+      "If it appears on every grid and grows during the session, stop and tell staff. That can point to the instrument rather than the specimen."
+     ]
+    },
+    {
+     "id": "sparse",
+     "label": "Few or no particles, or aggregation",
+     "steps": [
+      "Look at a few holes in several squares to see whether distribution changes with ice thickness.",
+      "Acquire a handful of test micrographs and inspect them at full resolution.",
+      "If particles gather at hole edges or aggregate, treat it as a sample or grid-preparation issue. Screening another grid may be faster than adjusting acquisition."
+     ]
+    },
+    {
+     "id": "bim",
+     "label": "Beam-induced motion or charging",
+     "steps": [
+      "Look at the motion traces of the first frames across several micrographs.",
+      "Compare holes at the center and edge of a square, and different squares.",
+      "If motion is high at the start of the exposure everywhere, ask staff about dose rate and exposure options."
+     ]
+    },
+    {
+     "id": "broken",
+     "label": "Broken squares or cracked grid",
+     "steps": [
+      "Check the atlas for how many squares are intact.",
+      "Compare with another grid from the same batch if you have one.",
+      "If squares broke after loading, record the grid slot and tell staff in case it happened during transfer."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "quality",
+   "label": "Data quality (CTF, motion, resolution)",
+   "general": [
+    "Run motion correction and CTF estimation on the first 50 to 100 micrographs.",
+    "Plot CTF fit resolution, astigmatism, and measured defocus against your target defocus range.",
+    "Split the results three ways: by grid square, by acquisition time, and by hole position. A square-specific problem points to the specimen. A time-dependent one points to drift or ice build-up. A uniform problem points to the instrument or setup.",
+    "Share the plots and the pattern you found with staff."
+   ],
+   "symptoms": [
+    {
+     "id": "ctf",
+     "label": "Poor CTF fits"
+    },
+    {
+     "id": "motion",
+     "label": "High total motion"
+    },
+    {
+     "id": "res",
+     "label": "Resolution limit lower than expected"
+    },
+    {
+     "id": "defocus",
+     "label": "Defocus far from target",
+     "steps": [
+      "Check the defocus range and autofocus settings in your protocol.",
+      "Check eucentric height at the acquisition positions.",
+      "Plot measured defocus along the hole-to-hole acquisition path to see where it departs from target."
+     ]
+    }
+   ],
+   "not_types": [
+    "fib"
+   ]
+  },
+  {
+   "id": "data",
+   "label": "Data transfer, storage or network",
+   "avoid": [
+    "Do not delete, rename or move collected data until staff confirm it is safe."
+   ],
+   "symptoms": [
+    {
+     "id": "full",
+     "label": "Disk almost full",
+     "steps": [
+      "Check free space on the acquisition computer and on the storage target.",
+      "Estimate what the rest of the collection needs: movie size times micrographs still to come.",
+      "Tell staff the free space and the expected finish time so they can clear space or pause."
+     ]
+    },
+    {
+     "id": "slow",
+     "label": "Transfer stalled or share unreachable",
+     "steps": [
+      "Check whether the transfer job or service is running and when it last moved files.",
+      "Check that the network share is reachable from the acquisition computer.",
+      "Leave source files in place until transfer is confirmed complete."
+     ]
+    },
+    {
+     "id": "corrupt",
+     "label": "Files missing or corrupted",
+     "steps": [
+      "Note which micrographs or movies are affected and the time range.",
+      "Compare file sizes of good and bad files in the same folder.",
+      "Report the time of the first failure, since it helps staff correlate it with system events."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "emhub_data",
+   "label": "EMhub data transfer or data access",
+   "general": [
+    "Write down your EMhub session or project name, the instrument, and the date of the collection.",
+    "Take a screenshot of what EMhub shows (missing session, wrong counts, error message) and note the time."
+   ],
+   "avoid": [
+    "Do not rename or move session folders or files. The EMhub session record may refer to them by path.",
+    "Do not start the same transfer repeatedly. Wait for staff if the first attempt did not complete."
+   ],
+   "symptoms": [
+    {
+     "id": "nodata",
+     "label": "Session or data not appearing in EMhub",
+     "steps": [
+      "Confirm the collection has finished writing on the acquisition computer, or that the session is still running.",
+      "Check that the session is linked to the right project and instrument in EMhub.",
+      "Check that you are logged in with the account that owns the project.",
+      "Note the session name, the folder path where the data were written, and the time of the last file. Give these to staff."
+     ]
+    },
+    {
+     "id": "stalled",
+     "label": "Transfer to EMhub-linked storage is stalled or slow",
+     "steps": [
+      "Check whether the transfer job or service is running and when it last moved files.",
+      "Check free space at the destination storage and on the acquisition computer.",
+      "Check that the network share is reachable from the acquisition computer.",
+      "Leave the source files in place until the transfer is confirmed complete."
+     ]
+    },
+    {
+     "id": "mismatch",
+     "label": "File counts or sizes do not match",
+     "steps": [
+      "Count the movies on the acquisition side and at the destination for the same session.",
+      "Compare file sizes of a few good and bad files in the same folder.",
+      "Note the time range of the missing or small files and report it to staff. It helps them correlate it with system events."
+     ]
+    },
+    {
+     "id": "noaccess",
+     "label": "Cannot open or download data from EMhub",
+     "steps": [
+      "Check that you are logged in and that the project is listed under your account or lab.",
+      "Try a second browser or a private window to rule out a stale session.",
+      "Note the exact error text and the project name, and send both to staff."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "emhub_book",
+   "label": "EMhub booking or scheduling",
+   "general": [
+    "Write down the instrument, date, time slot and booking name or ID involved.",
+    "Take a screenshot of the calendar or booking screen."
+   ],
+   "avoid": [
+    "Do not create duplicate bookings to work around a problem. A duplicate can block the slot for other users."
+   ],
+   "symptoms": [
+    {
+     "id": "nobook",
+     "label": "Cannot find or create a booking",
+     "steps": [
+      "Check that you are logged in with your own account.",
+      "Check that the calendar is filtered to the right instrument and the right date range.",
+      "Check that your project or application is approved for that instrument. If you are unsure, ask staff.",
+      "Refresh the page, or try a second browser, then try once more."
+     ]
+    },
+    {
+     "id": "conflict",
+     "label": "Booking conflict or overlapping sessions",
+     "steps": [
+      "Compare your booking time with the neighboring bookings on the same instrument.",
+      "Note who holds the overlapping slot and the times involved.",
+      "Do not move or cancel anyone else's booking. Send the details to staff."
+     ]
+    },
+    {
+     "id": "wrongsession",
+     "label": "Booking shows the wrong time, instrument or project",
+     "steps": [
+      "Compare the booking with your confirmation or notes and note what differs.",
+      "Check the time zone and date display on the screen.",
+      "Do not edit the booking again until staff have seen it. Send a screenshot to staff."
+     ]
+    },
+    {
+     "id": "cancel",
+     "label": "Cannot change or cancel a booking",
+     "steps": [
+      "Check whether the booking is close to its start time, since some changes may be locked by facility rules.",
+      "Check that you are the owner of the booking.",
+      "Note the booking name or ID and what you tried, and send them to staff."
+     ]
+    },
+    {
+     "id": "access",
+     "label": "Cannot log in or no instrument access",
+     "steps": [
+      "Check that you are using the right account and address.",
+      "Check whether the problem is on one device only by trying a second device or browser.",
+      "Note the exact error text and send it to staff."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "fib",
+   "label": "Cryo-FIB or lamella milling",
+   "general": [
+    "Pause milling and do not start the next step until the problem is clear.",
+    "Save the current positions and record the milling step, current and pattern you were on."
+   ],
+   "avoid": [
+    "Do not change beam currents or retract the stage while a lamella is at risk without asking staff."
+   ],
+   "symptoms": [
+    {
+     "id": "crack",
+     "label": "Lamella cracks or breaks",
+     "steps": [
+      "Pause milling. Note the step (rough milling, fine milling, polishing) and angle when the damage appeared.",
+      "Image the lamella and surrounding area, and save the image with the position.",
+      "Check whether other lamellae on the grid show the same pattern. If so, the cause may be grid-wide (ice thickness, grid mounting) rather than the milling.",
+      "Tell staff before starting more lamellae with the same parameters."
+     ]
+    },
+    {
+     "id": "charge",
+     "label": "Charging, drift or unstable SEM or FIB imaging",
+     "steps": [
+      "Check that the sample has the conductive layer your protocol calls for.",
+      "Compare image stability at lower voltage or current for imaging.",
+      "Check whether drift is on all grids or only this one.",
+      "If drift is at every position, ask staff to check shuttle and clip seating."
+     ]
+    },
+    {
+     "id": "gis",
+     "label": "Platinum or GIS coating problem",
+     "steps": [
+      "Note which step failed: no deposit seen, or an issue with time or temperature.",
+      "Do not repeat the deposition more than once.",
+      "Image the surface to see whether any layer was deposited.",
+      "Ask staff to check the GIS before continuing."
+     ]
+    },
+    {
+     "id": "thk",
+     "label": "Lamella thickness not as expected",
+     "steps": [
+      "Record your current thickness estimate and the method you used.",
+      "Check milling currents, pattern sizes and milling angle against your protocol.",
+      "Check for redeposition or ice contamination on the surface.",
+      "Change one parameter at a time and tell staff what you changed."
+     ]
+    },
+    {
+     "id": "cont",
+     "label": "Ice contamination on the lamella",
+     "steps": [
+      "Note when the contamination appeared relative to milling and imaging.",
+      "Compare with another lamella on the same grid and with other grids from this session.",
+      "If contamination builds on every sample, ask staff to check the chamber and cold trap."
+     ]
+    },
+    {
+     "id": "xfer",
+     "label": "Shuttle or transfer problem",
+     "minSeverity": "stop",
+     "steps": [
+      "Stop. Do not repeat the transfer step.",
+      "Leave the shuttle and chamber in their current state.",
+      "Call staff now."
+     ]
+    }
+   ],
+   "only_types": [
+    "fib",
+    "other"
+   ]
+  },
+  {
+   "id": "other",
+   "label": "Something else or not sure",
+   "general": [
+    "Write down what you saw, what you were doing, and the time.",
+    "Take a screenshot or photo of any message on screen.",
+    "If you are unsure whether it is safe to continue, pause and wait for staff."
+   ],
+   "symptoms": []
+  }
+ ]
+}
