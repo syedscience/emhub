@@ -1,0 +1,90 @@
+{% import "mi_macros.html" as mi %}
+
+<div class="container-fluid dashboard-content">
+    {% set title = "Microscope Issues" %}
+    {% set about = "Report instrument problems and follow them until they are fixed." %}
+    {% set navigation = [('Microscope Issues', '')] %}
+    {% include 'include_header.html' %}
+
+    <div class="row mb-3">
+        {% for inst in instruments %}
+            {% set n = open_counts.get(inst.id, 0) %}
+            <div class="col-auto mb-2">
+                <a class="btn btn-sm {{ 'btn-outline-danger' if n else 'btn-outline-success' }}"
+                   href="{{ url_for_content('mi_issues', instrument_id=inst.id, status='open') }}"
+                   title="{{ n }} open issue(s)">
+                    {{ inst.name }}
+                    <span class="badge {{ 'badge-danger' if n else 'badge-success' }} ml-1">{{ n }}</span>
+                </a>
+            </div>
+        {% endfor %}
+    </div>
+
+    <div class="card">
+        <div class="card-header d-flex flex-wrap align-items-center">
+            <form class="form-inline" method="get" action="{{ url_for('main') }}">
+                <input type="hidden" name="content_id" value="mi_issues">
+                <label class="mr-2" for="mi-filter-status">Status</label>
+                <select class="form-control form-control-sm mr-3" id="mi-filter-status" name="status">
+                    {% for value, label in [('open', 'Open'), ('closed', 'Closed'), ('all', 'All')] %}
+                        <option value="{{ value }}" {{ 'selected' if filters.status == value }}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <label class="mr-2" for="mi-filter-instrument">Instrument</label>
+                <select class="form-control form-control-sm mr-3" id="mi-filter-instrument" name="instrument_id">
+                    <option value="">All</option>
+                    {% for inst in instruments %}
+                        <option value="{{ inst.id }}" {{ 'selected' if filters.instrument_id == inst.id }}>{{ inst.name }}</option>
+                    {% endfor %}
+                </select>
+                <div class="form-check mr-3">
+                    <input class="form-check-input" type="checkbox" id="mi-filter-mine" name="mine" value="1" {{ 'checked' if filters.mine }}>
+                    <label class="form-check-label" for="mi-filter-mine">Only my reports</label>
+                </div>
+                <button type="submit" class="btn btn-sm btn-outline-primary">Filter</button>
+            </form>
+            <a class="btn btn-primary ml-auto" href="{{ url_for_content('mi_report') }}" role="button">
+                <i class="fas fa-exclamation-triangle"></i> Report an issue</a>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-striped table-bordered" id="mi-issues-table" style="width:100%">
+                    <thead>
+                        <tr>
+                            <th>Ticket</th>
+                            <th>Reported</th>
+                            <th>Instrument</th>
+                            <th>Problem area</th>
+                            <th>Title</th>
+                            <th>Urgency</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for issue in issues %}
+                        <tr>
+                            <td><a href="{{ url_for_content('mi_issue', issue_id=issue.id) }}">{{ issue.ticket }}</a>
+                                {% if issue.is_mine %}<span class="badge badge-light ml-1">mine</span>{% endif %}</td>
+                            <td data-order="{{ issue.reported_at }}">{{ issue.reported_at|pretty_datetime }}</td>
+                            <td>{{ issue.instrument_name }}</td>
+                            <td>{{ areas.get(issue.problem_area, issue.problem_area) }}</td>
+                            <td>{{ issue.title }}</td>
+                            <td data-order="{{ severities[issue.severity].rank if issue.severity in severities else 0 }}">
+                                {{ mi.severity_badge(issue.severity, severities) }}</td>
+                            <td>{{ mi.status_badge(issue.status) }}</td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    $('#mi-issues-table').DataTable({
+        pageLength: 25,
+        order: [[1, "desc"]],
+        language: {emptyTable: "No issues match these filters."}
+    });
+</script>

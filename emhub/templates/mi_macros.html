@@ -1,0 +1,14 @@
+{# Shared badges for the Microscope Issues pages #}
+{% set MI_SEVERITY_CLASS = {'stop': 'danger', 'blocked': 'warning', 'degraded': 'info', 'question': 'light'} %}
+{% set MI_STATUS_CLASS = {'new': 'primary', 'acknowledged': 'info', 'investigating': 'info',
+                          'waiting_vendor': 'warning', 'resolved': 'success', 'closed': 'secondary',
+                          'reopened': 'danger', 'duplicate': 'light'} %}
+
+{% macro severity_badge(severity, severities) -%}
+    {% set label = severities[severity].label if severity in severities else severity %}
+    <span class="badge badge-{{ MI_SEVERITY_CLASS.get(severity, 'secondary') }}">{{ label }}</span>
+{%- endmacro %}
+
+{% macro status_badge(status) -%}
+    <span class="badge badge-pill badge-{{ MI_STATUS_CLASS.get(status, 'secondary') }}">{{ status|replace('_', ' ')|capitalize }}</span>
+{%- endmacro %}

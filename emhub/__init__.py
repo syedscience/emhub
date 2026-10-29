@@ -199,6 +199,8 @@ def create_app(test_config=None):
             kwargs['view_usage_report'] = dm.check_user_access('usage_report')
             kwargs['view_pucks'] = dm.check_user_access('pucks')
             kwargs['view_inventories'] = dm.check_user_access('inventories')
+            kwargs['view_microscope_issues'] = (
+                    app.issues is not None and dm.check_user_access('microscope_issues'))
         else:
             if not no_login_content(content_id, params):
                 kwargs = {'content_id': 'user_login',
@@ -555,6 +557,12 @@ def create_app(test_config=None):
 
     app.booking_cost = booking_cost
     app.get_ldap_username = get_ldap_username
+
+    # Optional Microscope Issues module (see emhub/issues/__init__.py)
+    app.issues = None
+    if app.config.get('EMHUB_ISSUES', False):
+        from .issues import init_issues
+        init_issues(app)
 
 
     extra_setup = load_module('app_setup')

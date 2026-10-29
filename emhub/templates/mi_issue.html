@@ -1,0 +1,83 @@
+{% import "mi_macros.html" as mi %}
+
+<div class="container-fluid dashboard-content">
+    {% set title = issue.ticket ~ ': ' ~ issue.title %}
+    {% set navigation = [('Microscope Issues', url_for_content('mi_issues')), (issue.ticket, '')] %}
+    {% include 'include_header.html' %}
+
+    {% if created %}
+        <div class="alert alert-success">
+            Your report <strong>{{ issue.ticket }}</strong> was saved and the facility staff have been notified.
+        </div>
+    {% endif %}
+
+    <div class="row">
+        <div class="col-xl-7 col-lg-7 col-12">
+            <div class="card">
+                <div class="card-header d-flex align-items-center">
+                    <h5 class="mb-0 mr-3">{{ issue.instrument_name }}</h5>
+                    {{ mi.severity_badge(issue.severity, severities) }}
+                    <span class="ml-2">{{ mi.status_badge(issue.status) }}</span>
+                </div>
+                <div class="card-body">
+                    <dl class="row mb-0">
+                        <dt class="col-sm-4">Problem area</dt>
+                        <dd class="col-sm-8">{{ areas.get(issue.problem_area, issue.problem_area) }}</dd>
+                        {% if issue.symptoms %}
+                            <dt class="col-sm-4">Symptoms</dt>
+                            <dd class="col-sm-8">{{ issue.symptoms|map(attribute='label')|join(', ') }}</dd>
+                        {% endif %}
+                        <dt class="col-sm-4">Reported</dt>
+                        <dd class="col-sm-8">{{ issue.reported_at|pretty_datetime }}
+                            {% if issue.reporter_name %} by {{ issue.reporter_name }}{% endif %}</dd>
+                        {% if issue.occurred_at %}
+                            <dt class="col-sm-4">Started</dt>
+                            <dd class="col-sm-8">{{ issue.occurred_at|pretty_datetime }}</dd>
+                        {% endif %}
+                        {% if issue.contact %}
+                            <dt class="col-sm-4">Contact</dt>
+                            <dd class="col-sm-8">{{ issue.contact }}</dd>
+                        {% endif %}
+                        {% for key, value in issue.context.items() %}
+                            <dt class="col-sm-4">{{ key|replace('_', ' ')|capitalize }}</dt>
+                            <dd class="col-sm-8">{{ value }}</dd>
+                        {% endfor %}
+                    </dl>
+                    {% if issue.description %}
+                        <h6 class="mt-3">Description</h6>
+                        <p style="white-space: pre-wrap">{{ issue.description }}</p>
+                    {% endif %}
+                    {% if issue.tried %}
+                        <h6>Already tried</h6>
+                        <p style="white-space: pre-wrap">{{ issue.tried }}</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-5 col-lg-5 col-12">
+            <div class="card">
+                <div class="card-header"><h5 class="mb-0">History</h5></div>
+                <div class="card-body">
+                    <ul class="list-unstyled mb-0">
+                        {% for e in issue.events|reverse %}
+                            <li class="mb-2">
+                                <small class="text-muted">{{ e.at|pretty_datetime }}</small><br>
+                                {% if e.kind == 'created' %}
+                                    Reported{% if e.actor_name %} by {{ e.actor_name }}{% endif %}
+                                    {% if e.data.bumped_from %}
+                                        <br><small class="text-muted">Urgency raised from
+                                        {{ severities[e.data.bumped_from].label if e.data.bumped_from in severities else e.data.bumped_from }}
+                                        by the problem type.</small>
+                                    {% endif %}
+                                {% else %}
+                                    {{ e.kind|replace('_', ' ')|capitalize }}{% if e.actor_name %} by {{ e.actor_name }}{% endif %}
+                                {% endif %}
+                            </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

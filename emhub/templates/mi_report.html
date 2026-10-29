@@ -1,0 +1,284 @@
+<div class="container-fluid dashboard-content">
+    {% set title = "Report an issue" %}
+    {% set about = "Tell the facility staff what is wrong. Your name and email are taken from your EMhub login." %}
+    {% set navigation = [('Microscope Issues', url_for_content('mi_issues')), ('Report an issue', '')] %}
+    {% include 'include_header.html' %}
+
+    <div class="row">
+        <div class="col-xl-7 col-lg-7 col-12">
+            <div class="card">
+                <div class="card-body">
+                    <div id="mi-loading" class="text-muted">Loading instruments...</div>
+                    <form id="mi-report-form" novalidate style="display: none">
+                        <div class="form-group">
+                            <label for="mi-instrument">Instrument <span class="text-danger">*</span></label>
+                            <select class="form-control" id="mi-instrument" name="instrument_id" required></select>
+                            <div class="invalid-feedback" data-for="instrument_id"></div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="mi-area">Problem area <span class="text-danger">*</span></label>
+                            <select class="form-control" id="mi-area" name="problem_area" required></select>
+                            <div class="invalid-feedback" data-for="problem_area"></div>
+                        </div>
+
+                        <div class="form-group" id="mi-symptoms-group" style="display: none">
+                            <label>What do you see? <small class="text-muted">(select all that apply)</small></label>
+                            <div id="mi-symptoms"></div>
+                            <div class="invalid-feedback" data-for="symptoms"></div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="mi-title">Short title <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="mi-title" name="title" maxlength="200" required
+                                   placeholder="e.g. Autoloader will not dock cassette">
+                            <div class="invalid-feedback" data-for="title"></div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="mi-description">Description</label>
+                            <textarea class="form-control" id="mi-description" name="description" rows="4" maxlength="10000"
+                                      placeholder="What happened, error messages, what you were doing"></textarea>
+                            <div class="invalid-feedback" data-for="description"></div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="mi-tried">What have you already tried?</label>
+                            <textarea class="form-control" id="mi-tried" name="tried" rows="2" maxlength="5000"></textarea>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group col-md-6">
+                                <label for="mi-occurred">When did it start?</label>
+                                <input type="datetime-local" class="form-control" id="mi-occurred" name="occurred_at">
+                                <div class="invalid-feedback" data-for="occurred_at"></div>
+                            </div>
+                            <div class="form-group col-md-6">
+                                <label for="mi-contact">Where can staff reach you?</label>
+                                <input type="text" class="form-control" id="mi-contact" name="contact" maxlength="256"
+                                       placeholder="Room, phone or Teams">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group col-md-4">
+                                <label for="mi-session-status">Session status</label>
+                                <select class="form-control" id="mi-session-status" data-context="session_status">
+                                    <option value=""></option>
+                                    <option>Running</option><option>Paused</option>
+                                    <option>Stopped</option><option>Not started yet</option>
+                                </select>
+                            </div>
+                            <div class="form-group col-md-4">
+                                <label for="mi-software">Software</label>
+                                <select class="form-control" id="mi-software" data-context="software">
+                                    <option value=""></option>
+                                    <option>EPU</option><option>SerialEM</option><option>Tomo5</option>
+                                    <option>AutoTEM</option><option>Other</option>
+                                </select>
+                            </div>
+                            <div class="form-group col-md-4">
+                                <label for="mi-onset">Onset</label>
+                                <select class="form-control" id="mi-onset" data-context="onset">
+                                    <option value=""></option>
+                                    <option>Just now</option><option>5-15 min ago</option>
+                                    <option>15-60 min ago</option><option>More than 1 h ago</option>
+                                    <option>Comes and goes</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>How urgent is it? <span class="text-danger">*</span></label>
+                            <div id="mi-severities"></div>
+                            <div class="alert alert-warning mt-2 py-2" id="mi-bump" style="display: none"></div>
+                            <div class="invalid-feedback" data-for="severity"></div>
+                        </div>
+
+                        <div class="alert alert-danger" id="mi-form-error" style="display: none"></div>
+
+                        <button type="submit" class="btn btn-primary" id="mi-submit">
+                            <i class="fas fa-paper-plane"></i> Send report</button>
+                        <a class="btn btn-light ml-2" href="{{ url_for_content('mi_issues') }}">Cancel</a>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-5 col-lg-5 col-12">
+            <div class="card" id="mi-guide" style="display: none">
+                <div class="card-header"><h5 class="mb-0"><i class="fas fa-life-ring"></i> While you wait</h5></div>
+                <div class="card-body" id="mi-guide-body"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var META_URL = "{{ url_for('issues_api.meta') }}";
+    var CREATE_URL = "{{ url_for('issues_api.create_issue') }}";
+    var ISSUE_URL = "{{ url_for_content('mi_issue') }}";
+    var CSRF = "{{ csrf_token }}";
+    var SELECTED = {{ selected_instrument_id|tojson }};
+    var meta = null, areasById = {}, sevRank = {};
+    // One key per form load, so double clicks or retries create one issue
+    var idempotencyKey = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+        : String(Date.now()) + Math.random().toString(16).slice(2);
+
+    function option(value, label) {
+        return $('<option>').val(value).text(label);
+    }
+
+    function list(title, items, cls) {
+        if (!items || !items.length) return null;
+        var div = $('<div class="mb-3">');
+        div.append($('<h6>').addClass(cls || '').text(title));
+        var ul = $('<ul class="mb-0 pl-3">');
+        items.forEach(function (t) { ul.append($('<li>').text(t)); });
+        return div.append(ul);
+    }
+
+    function selectedArea() { return areasById[$('#mi-area').val()]; }
+
+    function renderAreas() {
+        var inst = meta.instruments.find(function (i) { return String(i.id) === $('#mi-instrument').val(); });
+        var sel = $('#mi-area').empty().append(option('', 'Select a problem area...'));
+        if (inst) {
+            inst.problem_areas.forEach(function (aid) {
+                if (areasById[aid]) sel.append(option(aid, areasById[aid].label));
+            });
+        }
+        renderArea();
+    }
+
+    function renderArea() {
+        var area = selectedArea();
+        var box = $('#mi-symptoms').empty();
+        var guide = $('#mi-guide-body').empty();
+        if (!area) {
+            $('#mi-symptoms-group, #mi-guide').hide();
+            updateBump();
+            return;
+        }
+        (area.symptoms || []).forEach(function (s) {
+            box.append($('<label class="custom-control custom-checkbox d-block">').append(
+                $('<input type="checkbox" class="custom-control-input mi-symptom">').val(s.id),
+                $('<span class="custom-control-label">').text(s.label)));
+        });
+        $('#mi-symptoms-group').toggle((area.symptoms || []).length > 0);
+
+        if (area.staffOnly) {
+            guide.append($('<div class="alert alert-danger py-2">').text(
+                'Staff action only: do not try to fix this yourself. Report it and wait for staff.'));
+        }
+        [list('Do this now', area.hold, 'text-danger'),
+         list('Checks you can do', area.general),
+         list('Avoid', area.avoid, 'text-warning'),
+         list('Please note in your report', area.record)].forEach(function (el) {
+            if (el) guide.append(el);
+        });
+        $('#mi-guide').toggle(guide.children().length > 0);
+        updateBump();
+    }
+
+    function minimumSeverity() {
+        var area = selectedArea(), best = null;
+        if (!area) return null;
+        var candidates = [area.minSeverity];
+        $('.mi-symptom:checked').each(function () {
+            var sid = $(this).val();
+            var s = (area.symptoms || []).find(function (x) { return x.id === sid; });
+            if (s) candidates.push(s.minSeverity);
+        });
+        candidates.forEach(function (m) {
+            if (m in sevRank && (best === null || sevRank[m] > sevRank[best])) best = m;
+        });
+        return best;
+    }
+
+    function updateBump() {
+        var min = minimumSeverity(), chosen = $('input[name=severity]:checked').val();
+        if (min && chosen && sevRank[chosen] < sevRank[min]) {
+            var label = meta.severities.find(function (s) { return s.id === min; }).label;
+            $('#mi-bump').text('This problem is always treated as at least "' + label +
+                               '". It will be sent with that urgency.').show();
+        } else {
+            $('#mi-bump').hide();
+        }
+    }
+
+    function showErrors(errors, message) {
+        $('#mi-report-form .is-invalid').removeClass('is-invalid');
+        $('#mi-report-form .invalid-feedback').text('').hide();
+        Object.keys(errors || {}).forEach(function (field) {
+            $('#mi-report-form [name=' + field + ']').addClass('is-invalid');
+            $('#mi-report-form .invalid-feedback[data-for=' + field + ']').text(errors[field]).show();
+        });
+        if (message) $('#mi-form-error').text(message).show(); else $('#mi-form-error').hide();
+    }
+
+    function submit(e) {
+        e.preventDefault();
+        var context = {};
+        $('[data-context]').each(function () {
+            if ($(this).val()) context[$(this).data('context')] = $(this).val();
+        });
+        var payload = {
+            idempotency_key: idempotencyKey,
+            instrument_id: parseInt($('#mi-instrument').val()) || null,
+            problem_area: $('#mi-area').val(),
+            symptoms: $('.mi-symptom:checked').map(function () { return $(this).val(); }).get(),
+            title: $('#mi-title').val(),
+            description: $('#mi-description').val(),
+            tried: $('#mi-tried').val(),
+            occurred_at: $('#mi-occurred').val() || null,
+            contact: $('#mi-contact').val(),
+            severity: $('input[name=severity]:checked').val() || null,
+            context: context
+        };
+        $('#mi-submit').prop('disabled', true);
+        $.ajax({
+            url: CREATE_URL, type: 'POST', data: JSON.stringify(payload),
+            contentType: 'application/json; charset=utf-8', dataType: 'json',
+            headers: {'X-MI-CSRF': CSRF}
+        }).done(function (data) {
+            window.location.href = ISSUE_URL + '&issue_id=' + data.issue.id + '&created=1';
+        }).fail(function (xhr) {
+            var body = xhr.responseJSON || {};
+            showErrors(body.errors, body.error || ('Could not send the report (' + xhr.status +
+                       '). Nothing was saved, please try again.'));
+            $('#mi-submit').prop('disabled', false);
+        });
+    }
+
+    $.getJSON(META_URL).done(function (data) {
+        meta = data;
+        data.problem_areas.forEach(function (a) { areasById[a.id] = a; });
+        data.severities.forEach(function (s) { sevRank[s.id] = s.rank; });
+
+        var inst = $('#mi-instrument').append(option('', 'Select an instrument...'));
+        data.instruments.forEach(function (i) { inst.append(option(i.id, i.name)); });
+        if (SELECTED) inst.val(String(SELECTED));
+
+        var sevBox = $('#mi-severities');
+        data.severities.slice().sort(function (a, b) { return b.rank - a.rank; }).forEach(function (s) {
+            sevBox.append($('<label class="custom-control custom-radio d-block">').append(
+                $('<input type="radio" class="custom-control-input" name="severity">').val(s.id),
+                $('<span class="custom-control-label">')
+                    .append($('<strong>').text(s.label), document.createTextNode(' - ' + s.desc))));
+        });
+
+        $('#mi-instrument').on('change', renderAreas);
+        $('#mi-area').on('change', renderArea);
+        $('#mi-report-form').on('change', '.mi-symptom, input[name=severity]', updateBump);
+        $('#mi-report-form').on('submit', submit);
+        renderAreas();
+        $('#mi-loading').hide();
+        $('#mi-report-form').show();
+    }).fail(function (xhr) {
+        $('#mi-loading').removeClass('text-muted').addClass('text-danger')
+            .text('Could not load the report form (' + xhr.status + '). Please reload the page.');
+    });
+})();
+</script>

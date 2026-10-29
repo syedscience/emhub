@@ -34,6 +34,13 @@
                                     <i class="fas fa-clipboard-list"></i>Sessions</a>
                             </li>
 
+                            {% if view_microscope_issues %}
+                            <li class="nav-item">
+                                <a class="nav-link" href="{{ url_for_content('mi_issues') }}">
+                                    <i class="fas fa-exclamation-triangle"></i>Microscope Issues</a>
+                            </li>
+                            {% endif %}
+
                             <li class="nav-item">
                                 <a class="nav-link" href="{{ url_for_content('applications') }}">
                                     <i class="fas fa-rocket"></i>Applications</a>

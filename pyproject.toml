@@ -36,10 +36,13 @@ emh-data = "emhub.data.__main__:main"
 emh-client = "emhub.client.__main__:main"
 emh-relion = "emhub.data.processing.processing_relion.__main__:main"
 emh-mcp = "emhub.mcp.server:main"
+emh-issues = "emhub.issues.__main__:main"
 
 [project.optional-dependencies]
 # MCP server (emh-mcp), see emhub/mcp/README.rst
 mcp = ["mcp>=1.20"]
+# Microscope Issues module (emh-issues), see emhub/issues/__init__.py
+issues = ["alembic==1.16.5", "psycopg[binary]==3.3.6"]
 
 [tool.setuptools]
 # Templates and static files are included via MANIFEST.in
