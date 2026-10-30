@@ -54,8 +54,11 @@
                     {% if issue.occurred_at %}<div><dt>Started</dt><dd>{{ issue.occurred_at|pretty_datetime }}</dd></div>{% endif %}
                     {% if issue.contact %}<div><dt>Where to find them</dt><dd>{{ issue.contact }}</dd></div>{% endif %}
                     {% if issue.acknowledged_at %}<div><dt>First response</dt><dd>{{ issue.acknowledged_at|pretty_datetime }}</dd></div>{% endif %}
-                    {% for key, value in issue.context.items() %}
-                        <div><dt>{{ key|replace('_', ' ')|capitalize }}</dt><dd>{{ value }}</dd></div>
+                    {% set context_labels = {'pi': 'PI', 'session': 'EMhub session', 'booking_id': 'Booking',
+                                             'session_type': 'Session type', 'session_status': 'Session status',
+                                             'onset': 'Started', 'software': 'Software', 'detector': 'Detector'} %}
+                    {% for key, value in issue.context.items() if key != 'session_id' %}
+                        <div><dt>{{ context_labels.get(key, key|replace('_', ' ')|capitalize) }}</dt><dd>{{ value }}</dd></div>
                     {% endfor %}
                     {% if issue.affected %}<div><dt>Also affected</dt><dd>{{ issue.affected|join(', ') }}</dd></div>{% endif %}
                 </dl>

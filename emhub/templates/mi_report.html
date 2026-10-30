@@ -39,6 +39,19 @@
                 <select id="mi-instrument" name="instrument_id" hidden></select>
                 <select id="mi-area" name="problem_area" hidden></select>
 
+                <section class="step who" id="step-who">
+                    <span class="avatar">{{ reporter.initials }}</span>
+                    <dl class="who-facts">
+                        <div><dt>Reporting as</dt><dd>{{ reporter.name }}</dd></div>
+                        <div><dt>PI</dt><dd>{{ reporter.pi or '—' }}</dd></div>
+                        <div><dt>Email</dt><dd>{{ reporter.email or '—' }}</dd></div>
+                        <div class="who-session">
+                            <dt><label for="mi-booking">EMhub session</label></dt>
+                            <dd><select id="mi-booking"></select></dd>
+                        </div>
+                    </dl>
+                </section>
+
                 <section class="step" id="step-instrument">
                     <div class="step-head">
                         <span class="step-num">1</span>
@@ -126,7 +139,6 @@
                             <div class="ferr" data-for="contact"></div>
                         </div>
                     </div>
-                    <p class="meta" style="margin: 10px 0 0">Reporting as <b>{{ reporter.name }}</b>{% if reporter.pi %} · {{ reporter.pi }}{% endif %}{% if reporter.email %} · {{ reporter.email }}{% endif %}</p>
                 </section>
 
                 <div class="actions">
@@ -171,6 +183,7 @@
     var STAFF_PHONE = {{ staff_phone|tojson }};
     var CSRF = "{{ csrf_token }}";
     var SELECTED = {{ selected_instrument_id|tojson }};
+    var MY_SESSIONS = {{ my_sessions|tojson }};   // current bookings and running sessions
     var AREA_ICONS = {loader: 'fa-box-open', vacuum: 'fa-thermometer-half', beam: 'fa-sun', stage: 'fa-crosshairs',
                       detector: 'fa-camera', filter: 'fa-filter', software: 'fa-desktop', specimen: 'fa-snowflake',
                       quality: 'fa-chart-line', data: 'fa-hdd', emhub_data: 'fa-database',
@@ -206,6 +219,32 @@
     }
     function selectedSymptoms() {
         return $('#mi-symptoms input:checked').map(function () { return $(this).val(); }).get();
+    }
+
+    // ---------------- Reporter's session ----------------
+    function fmtTime(iso) {
+        if (!iso) return '';
+        var d = new Date(iso), today = new Date();
+        var t = d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+        return d.toDateString() === today.toDateString() ? t
+            : d.toLocaleDateString([], {weekday: 'short', day: 'numeric', month: 'short'}) + ' ' + t;
+    }
+    function renderSessions() {
+        var sel = $('#mi-booking').empty();
+        MY_SESSIONS.forEach(function (x, i) {
+            var when = fmtTime(x.start) + (x.end ? ' to ' + fmtTime(x.end) : '');
+            sel.append(option(String(i), [x.instrument_name, when, x.session_name || x.title]
+                .filter(Boolean).join(' · ')));
+        });
+        sel.append(option('', MY_SESSIONS.length ? 'Not in one of these sessions' : 'No booking or session right now'));
+        // Start on the current session of the chosen instrument, if any
+        var first = MY_SESSIONS.findIndex(function (x) { return String(x.instrument_id) === $('#mi-instrument').val(); });
+        sel.val(first >= 0 ? String(first) : '');
+        sel.prop('disabled', !MY_SESSIONS.length);
+    }
+    function selectedSession() {
+        var v = $('#mi-booking').val();
+        return v === '' || v == null ? null : MY_SESSIONS[parseInt(v)];
     }
 
     // ---------------- Instruments ----------------
@@ -521,6 +560,11 @@
         $('[data-context]').each(function () {
             if ($(this).val()) context[$(this).data('context')] = $(this).val();
         });
+        var session = selectedSession();
+        if (session) {
+            if (session.booking_id) context.booking_id = session.booking_id;
+            if (session.session_id) context.session_id = session.session_id;
+        }
         var checks = tickedText(), tried = checks.length ? 'Checks done:\n' + checks.join('\n') : '';
         var severity = $('input[name=severity]:checked').val() || null;
         var payload = {
@@ -573,6 +617,7 @@
         data.instruments.forEach(function (i) { inst.append(option(i.id, i.name)); });
         if (SELECTED) inst.val(String(SELECTED));
         renderInstruments();
+        renderSessions();
         loadNotices();
 
         var sevBox = $('#mi-severities');
@@ -590,7 +635,21 @@
         $('#mi-area-tiles').on('click', '.tile', function () {
             $('#mi-area').val($(this).data('area')).trigger('change');
         });
-        $('#mi-instrument').on('change', renderAreas);
+        $('#mi-instrument').on('change', function () {
+            // A session on another instrument no longer applies
+            var x = selectedSession();
+            if (x && String(x.instrument_id) !== $(this).val()) {
+                var match = MY_SESSIONS.findIndex(function (y) { return String(y.instrument_id) === $('#mi-instrument').val(); });
+                $('#mi-booking').val(match >= 0 ? String(match) : '');
+            }
+            renderAreas();
+        });
+        $('#mi-booking').on('change', function () {
+            var x = selectedSession();
+            if (x && String(x.instrument_id) !== $('#mi-instrument').val()) {
+                $('#mi-instrument').val(String(x.instrument_id)).trigger('change');
+            }
+        });
         $('#mi-area').on('change', renderSymptoms);
         $('[data-context]').on('change', function () { $(this).data('picked', true); });
         $('#mi-onset').on('change', function () {
@@ -615,6 +674,7 @@
             $('#mi-report-form')[0].reset();
             $('#mi-instrument, #mi-area').val('');
             $('[data-context]').data('picked', false);
+            $('#mi-booking').val('');
             ticked = {};
             showErrors({}, null);
             $('#mi-occurred-row').hide();

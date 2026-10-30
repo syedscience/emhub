@@ -129,11 +129,17 @@ def register_content(dc):
         roles, config = svc.roles(), svc.config()
         user = flask_login.current_user
         pi = user.get_pi() if user.is_authenticated else None
+        sessions = svc.my_sessions(user)
+        # With no instrument in the link, start on the user's current session
+        if selected is None and sessions:
+            selected = sessions[0]['instrument_id']
         return {
             'selected_instrument_id': selected,
+            'my_sessions': sessions,
             # Shown read-only: who is reporting comes from the EMhub login
             'reporter': {'name': user.name, 'email': user.email or '',
-                         'pi': pi.name if pi and pi != user else ''},
+                         'pi': pi.name if pi and pi != user else '',
+                         'initials': ''.join(w[0] for w in user.name.split()[:2]).upper()},
             # Ticket of the report just sent, shown as a confirmation
             'submitted': str(kwargs.get('submitted') or '')[:32],
             'is_manager': MANAGER in roles,

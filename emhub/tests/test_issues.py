@@ -191,6 +191,41 @@ class TestIssues(unittest.TestCase):
         r = self.client_for(self.manager).get('/api/mi/meta')
         self.assertEqual(r.get_json()['roles'], ['manager', 'reporter'])
 
+    def test_report_starts_with_the_users_session(self):
+        dm = self.app.dm
+        now = dt.datetime.now(dt.timezone.utc)
+        with self.app.app_context():
+            booking = dm.Booking(title='Grid screening', type='booking', resource_id=self.krios.id,
+                                 start=now - dt.timedelta(hours=1), end=now + dt.timedelta(hours=3),
+                                 creator_id=self.reporter.id, owner_id=self.reporter.id,
+                                 operator_id=self.reporter.id)
+            dm._db_session.add(booking)
+            dm._db_session.commit()
+            booking_id = booking.id
+
+        def cleanup():
+            with self.app.app_context():
+                dm._db_session.delete(dm.get_booking_by(id=booking_id))
+                dm._db_session.commit()
+        self.addCleanup(cleanup)
+
+        with self.app.app_context():
+            mine = self.svc.my_sessions(self.reporter)
+            self.assertEqual(self.svc.my_sessions(self.other), [])
+        self.assertEqual(mine[0]['booking_id'], booking_id)
+        self.assertEqual(mine[0]['instrument_id'], self.krios.id)
+        status, html = self.content(self.reporter, content_id='mi_report')
+        self.assertIn('Grid screening', html)
+        self.assertIn('Reporting as', html)
+
+        # The booking is kept for its owner, dropped for anyone else
+        issue = self.new_issue(context={'booking_id': booking_id})
+        self.assertEqual(issue['context'].get('booking_id'), str(booking_id))
+        r = self.report(user=self.other, context={'booking_id': booking_id})
+        self.assertEqual(r.status_code, 201, r.get_json())
+        other = self.get_issue(r.get_json()['issue']['id'])
+        self.assertNotIn('booking_id', other['context'])
+
     def test_reporters_only_get_a_receipt(self):
         r = self.report(contact='Room B-101')
         self.assertEqual(r.status_code, 201, r.get_json())

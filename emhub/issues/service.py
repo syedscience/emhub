@@ -484,6 +484,75 @@ class IssuesService:
             errors['occurred_at'] = 'Cannot be in the future.'
         return when
 
+    # ------------------------- Reporter's sessions ---------------------------
+    @staticmethod
+    def _involves(item, user):
+        return user.id in (getattr(item, 'owner_id', None), item.operator_id,
+                           getattr(item, 'creator_id', None))
+
+    def my_sessions(self, user=None):
+        """ The user's bookings on now (or just ended) and running sessions,
+        on instruments that take reports, newest first. They pre-fill the
+        report form. """
+        user = user if user is not None else self.app.user
+        if user is None or not getattr(user, 'is_authenticated', False):
+            return []
+        dm, now = self.app.dm, utcnow()
+        since = (now - dt.timedelta(days=2)).strftime('%Y-%m-%d')
+        reportable = {i.id: i for i in self.instruments()}
+        items, seen = [], set()
+
+        def add(booking, session):
+            inst = reportable.get((session or booking).resource_id)
+            if inst is None:
+                return
+            if session is not None:
+                seen.add(session.id)
+            items.append({
+                'booking_id': booking.id if booking else None,
+                'session_id': session.id if session else None,
+                'session_name': session.name if session else '',
+                'title': booking.title if booking else '',
+                'instrument_id': inst.id,
+                'instrument_name': inst.name,
+                'start': iso((booking or session).start),
+                'end': iso(booking.end if booking else session.end),
+            })
+
+        uid = int(user.id)
+        bookings = dm.get_bookings(condition=f"(owner_id={uid} OR operator_id={uid} "
+                                             f"OR creator_id={uid}) AND type='booking' "
+                                             f"AND end>='{since}'")
+        for b in bookings:
+            if as_utc(b.start) - dt.timedelta(hours=1) <= now <= as_utc(b.end) + dt.timedelta(hours=2):
+                sessions = sorted(b.session or [], key=lambda s: s.id)
+                add(b, sessions[-1] if sessions else None)
+        for s in dm.get_sessions(condition=f"operator_id={uid} AND start>='{since}'"):
+            if s.id not in seen and s.status == 'active' and (
+                    s.end is None or as_utc(s.end) >= now - dt.timedelta(hours=2)):
+                add(s.booking, s)
+        items.sort(key=lambda x: x['start'] or '', reverse=True)
+        return items
+
+    def _session_context(self, raw, user, roles):
+        """ Booking and session from the form, kept only when they are the
+        reporter's own (or a manager reports), with the session name. """
+        dm, out = self.app.dm, {}
+        booking = session = None
+        if str(raw.get('booking_id') or '').isdigit():
+            booking = dm.get_booking_by(id=int(raw['booking_id']))
+        if str(raw.get('session_id') or '').isdigit():
+            session = dm.get_session_by(id=int(raw['session_id']))
+        manager = MANAGER in roles
+        if booking is not None and (manager or self._involves(booking, user)):
+            out['booking_id'] = str(booking.id)
+        if session is not None and (manager or session.operator_id == user.id or
+                                    (booking is not None and session.booking_id == booking.id
+                                     and 'booking_id' in out)):
+            out['session_id'] = str(session.id)
+            out['session'] = session.name[:128]
+        return out
+
     def create_issue(self, payload, user=None):
         """ Validate and store a new issue reported by the current user.
         The issue, its 'created' event and the queued notifications are
@@ -542,6 +611,12 @@ class IssuesService:
                 v = raw_context.get(k)
                 if v not in (None, ''):
                     context[k] = str(v)[:128]
+            context.pop('booking_id', None)
+            context.pop('session_id', None)
+            context.update(self._session_context(raw_context, user, roles))
+        pi = user.get_pi() if hasattr(user, 'get_pi') else None
+        if pi is not None and pi != user:
+            context['pi'] = pi.name[:128]
 
         if errors:
             raise ValidationError(errors)
