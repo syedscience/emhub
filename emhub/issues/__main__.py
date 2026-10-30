@@ -28,6 +28,8 @@ Command line tool for the Microscope Issues module.
     emh-issues sync-instruments   Copy EMhub resources into the issues database
     emh-issues init-config        Create the 'config:issues' form with defaults
     emh-issues worker [--once]    Send notifications and escalate overdue issues
+    emh-issues import-logbooks 219,220 [--map 223=12] [--commit]
+                                  Import EMhub logbook entries as history
 
 EMHUB_INSTANCE must point to the EMhub instance folder.
 """
@@ -60,6 +62,12 @@ def main():
     sub.add_parser('status', help='Show the database and schema revision.')
     sub.add_parser('sync-instruments', help='Copy EMhub resources as instruments.')
     sub.add_parser('init-config', help="Create the 'config:issues' form with defaults.")
+    imp = sub.add_parser('import-logbooks', help='Import EMhub logbook entries as history.')
+    imp.add_argument('logbooks', help='Comma-separated logbook (project) ids.')
+    imp.add_argument('--map', action='append', default=[], metavar='LOGBOOK=RESOURCE',
+                     help='Instrument (EMhub resource id) for a logbook without one.')
+    imp.add_argument('--commit', action='store_true',
+                     help='Save the import. Without it, only a dry-run report is shown.')
     w = sub.add_parser('worker', help='Send notifications and escalate overdue issues.')
     w.add_argument('--once', action='store_true', help='Process once and exit.')
     w.add_argument('--interval', type=int, default=10, help='Seconds between runs.')
@@ -103,6 +111,27 @@ def main():
             app.dm.create_form(name='config:issues', definition=DEFAULT_CONFIG)
             print(f"Created form 'config:issues' (as admin '{admin.username}'). "
                   f"Edit it in EMhub under Forms.")
+
+    elif args.command == 'import-logbooks':
+        from .importers import import_logbooks
+        if app.issues is None:
+            sys.exit("Set EMHUB_ISSUES = True in the instance config.py first.")
+        try:
+            ids = [int(x) for x in args.logbooks.split(',') if x.strip()]
+            mapping = {int(k): int(v) for k, v in (m.split('=') for m in args.map)}
+        except ValueError:
+            sys.exit("Use numeric ids, e.g. 219,220 --map 223=12")
+        with app.app_context():
+            report = import_logbooks(app.issues, ids, mapping, dry_run=not args.commit)
+        for lb in report['logbooks']:
+            print(f"Logbook {lb['logbook_id']} ({lb['title']}): {lb['entries']} entries, "
+                  f"{lb['imported']} to import, {lb['already']} already imported, "
+                  f"{len(lb['skipped'])} skipped")
+            for sk in lb['skipped']:
+                print(f"    skipped entry {sk['entry']}: {sk['reason']}")
+        print(f"Total: {report['imported']} imported, {report['skipped']} skipped.")
+        if report['dry_run']:
+            print("Dry run: nothing was saved. Add --commit to import.")
 
     elif args.command == 'worker':
         import logging

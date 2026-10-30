@@ -192,7 +192,8 @@ class OutboxMessage(Base):
     issue_id = Column(Integer, ForeignKey('mi_issues.id', ondelete='CASCADE'),
                       index=True)
     event_id = Column(Integer, ForeignKey('mi_issue_events.id', ondelete='CASCADE'))
-    kind = Column(String(32), nullable=False, default='created')  # event kind or 'test'
+    kind = Column(String(32), nullable=False, default='created')  # event kind, 'test', 'summary'
+    payload = Column(JSON)  # extra data, e.g. the period of a weekly summary
     channel = Column(String(16), nullable=False)  # email | receipt | webhook
     destination = Column(String(512), nullable=False)
     dedupe_key = Column(String(128), nullable=False, unique=True)

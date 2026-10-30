@@ -565,6 +565,97 @@ class IssuesTestBase:
         self.assertNotIn('Staff actions', html)
 
 
+    # ------------------------- Phase 3: insights ------------------------------
+    def test_insights_page_and_access(self):
+        self.report(title='For insights')
+        html = self.client_for(self.manager).post('/get_content', data={
+            'content_id': 'mi_insights'}).get_data(as_text=True)
+        self.assertNotIn('error-modal-title', html)
+        self.assertIn('Incidents per week', html)
+        html = self.client_for(self.reporter).post('/get_content', data={
+            'content_id': 'mi_insights'}).get_data(as_text=True)
+        self.assertIn('error-modal-title', html)  # managers only
+        bad = self.client_for(self.manager).post('/get_content', data={
+            'content_id': 'mi_insights', 'start': '2026-13-01'}).get_data(as_text=True)
+        self.assertIn('error-modal-title', bad)
+
+    def test_csv_export(self):
+        self.report(title='=HYPERLINK("http://evil")', contact='lab')
+        r = self.client_for(self.reporter).get('/api/mi/export.csv')
+        self.assertEqual(r.status_code, 403)
+        r = self.client_for(self.manager).get('/api/mi/export.csv')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.mimetype, 'text/csv')
+        import csv as _csv
+        rows = list(_csv.DictReader(io.StringIO(r.get_data(as_text=True).lstrip('\ufeff'))))
+        evil = [x for x in rows if 'HYPERLINK' in x['title']][0]
+        self.assertTrue(evil['title'].startswith("'="))
+        self.assertEqual(evil['reporter_email'], self.reporter.email)
+
+    def test_weekly_summary(self):
+        from emhub.issues.worker import NotificationWorker
+        self.with_settings({'summary_email': ['head@example.org']})
+        tz = self.app.dm.timezone
+        monday_8am = dt.datetime(2026, 11, 2, 8, 0, tzinfo=tz)  # a Monday
+        with self.app.app_context():
+            self.assertEqual(self.svc.enqueue_weekly_summary(now=monday_8am), 1)
+            self.assertEqual(self.svc.enqueue_weekly_summary(now=monday_8am), 0)  # once a week
+            self.assertEqual(self.svc.enqueue_weekly_summary(
+                now=monday_8am + dt.timedelta(days=2)), 0)
+        msg = [m for m in self.outbox() if m.kind == 'summary'][-1]
+        self.assertEqual(msg.payload, {'start': '2026-10-26', 'end': '2026-11-01', 'week': '2026-W44'})
+        sent = []
+        NotificationWorker(self.app, send_email=lambda *a: sent.append(a),
+                           post_webhook=lambda *a: None).run_once()
+        subject, body = [(s_, b) for to, s_, b in sent if to == 'head@example.org'][0]
+        self.assertIn('weekly summary 2026-W44', subject)
+        self.assertIn('New incidents:', body)
+
+    def test_import_logbooks(self):
+        import flask_login
+        from emhub.issues.importers import import_logbooks
+        dm = self.app.dm
+        with self.app.test_request_context():
+            flask_login.login_user(self.admin)
+            lb = dm.create_project(title='Krios01 logbook %s' % self.__class__.__name__,
+                                   status='special:logbook', validate=False,
+                                   extra={'resource_id': self.krios.resource_id})
+            orphan = dm.create_project(title='Computing logbook', status='special:logbook',
+                                       validate=False, extra={})
+            day = dt.datetime(2026, 5, 4, 14, 0, tzinfo=dt.timezone.utc)
+            dm.create_entry(project_id=lb.id, type='logbook_microscope', title='K3 not ready',
+                            description='Camera server restart needed', date=day,
+                            extra={'data': {'category': 'detector', 'tags': ['k3'], 'actions': [
+                                {'date': '2026/05/04', 'status': 'critical', 'action': 'Reported'},
+                                {'date': '2026/05/06', 'status': 'solved', 'action': 'Restarted'}]}})
+            dm.create_entry(project_id=lb.id, type='logbook_microscope', title='Stage noise',
+                            date=day, extra={'data': {'actions': [
+                                {'date': '2026/05/05', 'status': 'medium', 'action': 'Seen twice'}]}})
+            dm.create_entry(project_id=orphan.id, type='logbook_microscope', title='NAS full',
+                            date=day, extra={'data': {}})
+            lb_id, orphan_id = lb.id, orphan.id
+
+        with self.app.app_context():
+            report = import_logbooks(self.svc, [lb_id, orphan_id], dry_run=True)
+            self.assertEqual(report['imported'], 2)
+            self.assertEqual(report['skipped'], 1)
+            report = import_logbooks(self.svc, [lb_id, orphan_id], dry_run=False)
+            self.assertEqual(report['imported'], 2)
+            again = import_logbooks(self.svc, [lb_id], dry_run=False)
+            self.assertEqual((again['imported'], again['logbooks'][0]['already']), (0, 2))
+
+        issues = self.client_for(self.manager).get('/api/mi/issues?status=all').get_json()['issues']
+        k3 = [i for i in issues if i['title'] == 'K3 not ready'][0]
+        noise = [i for i in issues if i['title'] == 'Stage noise'][0]
+        self.assertEqual((k3['status'], k3['severity']), ('closed', 'stop'))
+        self.assertEqual((noise['status'], noise['severity']), ('acknowledged', 'degraded'))
+        detail = self.client_for(self.manager).get('/api/mi/issues/%d' % k3['id']).get_json()['issue']
+        self.assertEqual([e['kind'] for e in detail['events']], ['imported', 'comment', 'comment'])
+        self.assertTrue(all(e['internal'] for e in detail['events']))
+        # Imported history never notifies anyone
+        self.assertEqual(self.outbox(k3['id']), [])
+
+
 class TestIssuesSqlite(IssuesTestBase, unittest.TestCase):
     @classmethod
     def get_db_url(cls, instance):
@@ -590,6 +681,112 @@ class TestIssuesDisabled(unittest.TestCase):
         html = client.get('/main?content_id=dashboard').get_data(as_text=True)
         self.assertNotIn('Microscope Issues', html)
         self.assertEqual(client.get('/api/mi/meta').status_code, 404)
+
+
+
+class TestInsightsDefinitions(unittest.TestCase):
+    """ Insight definitions on hand-made fixtures with known answers. """
+
+    def setUp(self):
+        from types import SimpleNamespace as NS
+        self.NS = NS
+        self.t0 = dt.datetime(2026, 9, 1, tzinfo=dt.timezone.utc)
+
+    def at(self, hours):
+        return self.t0 + dt.timedelta(hours=hours)
+
+    def issue(self, id, inst=1, reported=0, ack=None, resolved=None, occurred=None,
+              status='resolved', downtimes=(), imported=False, area='stage',
+              severity='blocked', events=(), resolution=None):
+        NS = self.NS
+        return NS(id=id, instrument_id=inst, instrument_name='Krios%02d' % inst,
+                  reported_at=self.at(reported),
+                  acknowledged_at=self.at(ack) if ack is not None else None,
+                  resolved_at=self.at(resolved) if resolved is not None else None,
+                  occurred_at=self.at(occurred) if occurred is not None else None,
+                  status=status, imported=imported, problem_area=area, severity=severity,
+                  assignee_name=None, symptoms=[], resolution=resolution or {},
+                  events=[NS(kind=k, at=self.at(h), data=d) for k, h, d in events],
+                  downtimes=[NS(instrument_id=inst, state=st, start=self.at(a),
+                                end=self.at(b) if b is not None else None)
+                             for st, a, b in downtimes])
+
+    def compute(self, issues, open_issues=(), now_h=24 * 30, **kw):
+        from emhub.issues.insights import compute
+        return compute(issues, list(open_issues), {1: 'Krios01', 2: 'Krios02'},
+                       self.t0, self.at(24 * 30), self.at(now_h), dt.timezone.utc, **kw)
+
+    def test_merge_and_percentiles(self):
+        from emhub.issues.insights import merge_intervals, percentile
+        a = self.at
+        self.assertEqual(merge_intervals([(a(0), a(4)), (a(2), a(6)), (a(8), a(9))]),
+                         [(a(0), a(6)), (a(8), a(9))])
+        self.assertEqual(percentile([10, 20, 30, 40], 0.5), 25)
+        self.assertAlmostEqual(percentile(range(1, 11), 0.9), 9.1)
+        self.assertIsNone(percentile([], 0.5))
+
+    def test_overlapping_downtime_counted_once(self):
+        issues = [self.issue(1, downtimes=[('unavailable', 10, 20)], resolved=20, ack=1),
+                  self.issue(2, downtimes=[('unavailable', 15, 30), ('degraded', 30, 40)],
+                             resolved=40, ack=2)]
+        r = self.compute(issues, booked_hours={1: 100.0})
+        krios = r['per_instrument'][0]
+        self.assertEqual(krios['downtime_hours'], 20.0)  # 10-30 merged, degraded excluded
+        self.assertEqual(krios['availability'], round(1 - 20 / 720, 4))
+        self.assertEqual(krios['per_100_booked_hours'], 2.0)
+
+    def test_open_downtime_clipped_to_now(self):
+        r = self.compute([self.issue(1, status='investigating', downtimes=[('unavailable', 700, None)])],
+                         now_h=710)
+        self.assertEqual(r['per_instrument'][0]['downtime_hours'], 10.0)
+
+    def test_response_and_restoration(self):
+        issues = [
+            # response 30 min; restoration from occurred_at (-2h) to downtime end (5h) = 7h
+            self.issue(1, reported=0, ack=0.5, occurred=-2, resolved=8,
+                       downtimes=[('unavailable', 0, 5)]),
+            # no downtime: restoration = resolved - reported = 3h; response 90 min
+            self.issue(2, reported=10, ack=11.5, resolved=13),
+            # reopened, unresolved: counted as an incident, not in restoration
+            self.issue(3, reported=20, ack=21, status='reopened'),
+            # imported history: excluded from timing
+            self.issue(4, reported=30, ack=30, resolved=31, imported=True),
+            # duplicate report: not an incident
+            self.issue(5, reported=40, status='duplicate'),
+        ]
+        r = self.compute(issues)
+        t = r['totals']
+        self.assertEqual((t['incidents'], t['duplicates']), (4, 1))
+        self.assertEqual(t['response_min']['n'], 3)
+        self.assertEqual(t['response_min']['median'], 60.0)
+        self.assertEqual(t['restoration_h']['n'], 2)
+        self.assertEqual(t['restoration_h']['median'], 5.0)
+        self.assertEqual(r['coverage']['unresolved'], 1)
+        self.assertEqual(r['coverage']['imported'], 1)
+
+    def test_vendor_wait_and_recurrence(self):
+        from emhub.issues.insights import vendor_wait_hours
+        i = self.issue(1, events=[('created', 0, {}),
+                                  ('waiting_vendor', 2, {'to': 'waiting_vendor'}),
+                                  ('investigate', 26, {'to': 'investigating'}),
+                                  ('resolve', 30, {'to': 'resolved'})])
+        self.assertEqual(vendor_wait_hours(i, self.at(100)), 24.0)
+        issues = [self.issue(1, reported=0), self.issue(2, reported=24 * 10),
+                  self.issue(3, reported=24 * 29, area='beam'),
+                  self.issue(4, inst=2, reported=0, area='other'),
+                  self.issue(5, inst=2, reported=24, area='other'),
+                  self.issue(6, inst=2, reported=0, imported=True),
+                  self.issue(7, inst=2, reported=24, imported=True)]
+        rec = self.compute(issues)['recurrence']
+        self.assertEqual([(x['instrument'], x['repeats']) for x in rec], [('Krios01', 1)])
+
+    def test_booked_hours_only_real_bookings(self):
+        from emhub.issues.insights import booked_hours_by_resource
+        NS = self.NS
+        b = [NS(type='booking', resource_id=1, start=self.at(-5), end=self.at(5)),
+             NS(type='slot', resource_id=1, start=self.at(0), end=self.at(48)),
+             NS(type='downtime', resource_id=1, start=self.at(0), end=self.at(48))]
+        self.assertEqual(dict(booked_hours_by_resource(b, self.t0, self.at(24))), {1: 5.0})
 
 
 if __name__ == '__main__':

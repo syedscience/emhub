@@ -29,7 +29,10 @@ it from mi_csrf_token()). Errors use proper HTTP status codes and a JSON body
 {"error": message, "errors": {field: message}}.
 """
 
+import csv
+import datetime as dt
 import hmac
+import io
 import secrets
 
 import flask
@@ -132,7 +135,8 @@ def list_issues():
         instrument_id = int(args['instrument_id']) if args.get('instrument_id') else None
     except ValueError:
         raise ValidationError({'instrument_id': 'Must be a number.'})
-    issues = svc.list_issues(status=args.get('status'),
+    status = args.get('status')
+    issues = svc.list_issues(status=None if status in (None, '', 'all') else status,
                              instrument_id=instrument_id,
                              mine=args.get('mine') in ('1', 'true'))
     return flask.jsonify({'issues': [svc.issue_json(i) for i in issues]})
@@ -289,3 +293,36 @@ def send_test():
 def retry_message(message_id):
     msg = _service().retry_message(message_id)
     return flask.jsonify({'message_id': msg.id, 'status': msg.status})
+
+
+def csv_safe(value):
+    """ Prevent spreadsheet formula injection in exported cells. """
+    value = '' if value is None else str(value)
+    if value[:1] in ('=', '+', '-', '@', '\t', '\r'):
+        return "'" + value
+    return value
+
+
+@issues_bp.route('/export.csv', methods=['GET'])
+def export_csv():
+    svc = _service()
+    args = flask.request.args
+    start, end = svc.parse_period(args.get('start') or None, args.get('end') or None)
+    try:
+        instrument_id = int(args['instrument_id']) if args.get('instrument_id') else None
+    except ValueError:
+        raise ValidationError({'instrument_id': 'Must be a number.'})
+    rows = svc.export_rows(start, end, instrument_id,
+                           include_imported=args.get('imported', '1') not in ('0', 'false'))
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(svc.EXPORT_COLUMNS)
+    for row in rows:
+        writer.writerow([csv_safe(row[c]) for c in svc.EXPORT_COLUMNS])
+    tz = flask.current_app.dm.timezone
+    name = (f"microscope-issues_{start.astimezone(tz):%Y-%m-%d}_"
+            f"{end.astimezone(tz) - dt.timedelta(days=1):%Y-%m-%d}.csv")
+    resp = flask.Response('\ufeff' + out.getvalue(), mimetype='text/csv')
+    resp.headers['Content-Disposition'] = f'attachment; filename="{name}"'
+    resp.headers['Cache-Control'] = 'private, no-store'
+    return resp

@@ -37,10 +37,12 @@ import uuid
 import flask
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import selectinload
 from werkzeug.utils import secure_filename
 
 from .authz import (user_issue_roles, require, Forbidden,
-                    REPORTER, STAFF, ADMIN)
+                    REPORTER, STAFF, MANAGER, ADMIN)
+from . import insights as mi_insights
 from .models import (Instrument, Issue, IssueSymptom, IssueEvent,
                      OutboxMessage, AffectedUser, Attachment,
                      DowntimeInterval, Notice, AuditEvent, as_utc, utcnow)
@@ -55,7 +57,8 @@ TYPE_TAGS = [
     ('tem', {'krios', 'arctica', 'talos', 'glacios', 'tem', 'tundra'}),
     ('light', {'confocal', 'airyscan', 'lsm', 'light'}),
     ('prep', {'vitrobot', 'prep', 'plunge', 'leica', 'negativestain',
-              'coater', 'plasma', 'hpf'}),
+              'coater', 'plasma', 'hpf', 'preparation', 'solarus', 'primo',
+              'micropatterning', 'freezer'}),
 ]
 
 # action: (allowed current statuses, new status, required role)
@@ -124,6 +127,7 @@ DEFAULT_CONFIG = {
         'routes': [],           # [{"instruments": [...], "min_severity": "blocked",
                                 #   "email": [...], "webhooks": [...]}]
         'ack_minutes': {},      # per severity, defaults from problem_areas.json
+        'summary_email': [],    # weekly summary (Monday morning) recipients
     },
 }
 
@@ -906,6 +910,7 @@ class IssuesService:
             },
             'routes': [],
             'ack_minutes': {},
+            'summary_email': emails('summary_email', payload.get('summary_email')),
         }
         for sid, minutes in (payload.get('ack_minutes') or {}).items():
             try:
@@ -962,8 +967,9 @@ class IssuesService:
         self.session.commit()
         return msg
 
-    def outbox_summary(self, user=None):
-        require(self.roles(user), ADMIN)
+    def outbox_summary(self, user=None, check_access=True):
+        if check_access:
+            require(self.roles(user), ADMIN)
         s = self.session
         counts = dict(s.execute(select(OutboxMessage.status, func.count())
                                 .group_by(OutboxMessage.status)).all())
@@ -1067,6 +1073,176 @@ class IssuesService:
                                  'contacts': contacts}, at=now)
                 count += 1
         self.session.commit()
+        return count
+
+    # ------------------------- Insights --------------------------------------
+    def parse_period(self, start=None, end=None, days=90):
+        """ Period [start, end) from 'YYYY-MM-DD' strings in facility time.
+        Defaults to the last 'days' days, ending tomorrow (today included). """
+        tz = self.app.dm.timezone
+        errors = {}
+
+        def _date(value, field):
+            try:
+                d = dt.date.fromisoformat(str(value))
+            except ValueError:
+                errors[field] = 'Use YYYY-MM-DD.'
+                return None
+            return dt.datetime.combine(d, dt.time(), tz).astimezone(dt.timezone.utc)
+
+        today = dt.datetime.now(tz).date()
+        end_dt = _date(end, 'end') + dt.timedelta(days=1) if end else \
+            dt.datetime.combine(today + dt.timedelta(days=1), dt.time(), tz).astimezone(dt.timezone.utc)
+        start_dt = _date(start, 'start') if start else end_dt - dt.timedelta(days=days)
+        if errors:
+            raise ValidationError(errors)
+        if start_dt >= end_dt:
+            raise ValidationError({'start': 'The start must be before the end.'})
+        if end_dt - start_dt > dt.timedelta(days=3700):
+            raise ValidationError({'start': 'The period can be at most 10 years.'})
+        return start_dt, end_dt
+
+    def _period_issues(self, start, end, instrument_id=None, include_imported=True):
+        q = (select(Issue)
+             .options(selectinload(Issue.events), selectinload(Issue.downtimes),
+                      selectinload(Issue.symptoms))
+             .where(Issue.reported_at >= start, Issue.reported_at < end)
+             .order_by(Issue.reported_at))
+        if instrument_id:
+            q = q.where(Issue.instrument_id == int(instrument_id))
+        if not include_imported:
+            q = q.where(Issue.imported.is_(False))
+        return list(self.session.scalars(q))
+
+    def insights(self, start, end, instrument_id=None, include_imported=True,
+                 user=None, now=None, check_access=True):
+        """ Compute the insights for the period (managers only; the worker
+        calls it with check_access=False for the weekly summary). """
+        if check_access:
+            user = user if user is not None else self.app.user
+            require(self.roles(user), MANAGER)
+        now = now or utcnow()
+        issues = self._period_issues(start, end, instrument_id, include_imported)
+
+        q = (select(Issue).options(selectinload(Issue.events))
+             .where(Issue.status.in_(Issue.OPEN_STATUSES)))
+        if instrument_id:
+            q = q.where(Issue.instrument_id == int(instrument_id))
+        if not include_imported:
+            q = q.where(Issue.imported.is_(False))
+        open_issues = list(self.session.scalars(q))
+
+        instruments = self.instruments(reportable_only=False, sync=False)
+        reported = {i.instrument_id for i in issues} | {i.instrument_id for i in open_issues}
+        shown = {i.id: i.name for i in instruments
+                 if (i.is_reportable or i.id in reported)
+                 and (not instrument_id or i.id == int(instrument_id))}
+        by_resource = mi_insights.booked_hours_by_resource(
+            self.app.dm.get_bookings(), start, end)
+        booked = {i.id: by_resource.get(i.resource_id, 0.0) for i in instruments if i.id in shown}
+
+        return mi_insights.compute(
+            issues, open_issues, shown, start, end, now, self.app.dm.timezone,
+            booked_hours=booked,
+            recurrence_days=int(self.config().get('recurrence_days', 30)),
+            severities=list(self.severities()),
+            areas={a['id']: a['label'] for a in self.problem_areas()})
+
+    EXPORT_COLUMNS = ['ticket', 'reported_at', 'occurred_at', 'acknowledged_at',
+                      'resolved_at', 'closed_at', 'instrument', 'problem_area',
+                      'symptoms', 'severity', 'status', 'instrument_state', 'title',
+                      'assignee', 'affected_users', 'response_min', 'restoration_h',
+                      'downtime_h', 'resolution_type', 'root_cause', 'resolution_notes',
+                      'time_lost_min', 'data_lost', 'vendor_ref', 'duplicate_of',
+                      'imported', 'reporter', 'reporter_email']
+
+    def export_rows(self, start, end, instrument_id=None, include_imported=True, user=None):
+        """ Rows for the CSV export (managers). Reporter identity is only
+        included for staff, as on the pages. """
+        user = user if user is not None else self.app.user
+        roles = self.roles(user)
+        require(roles, MANAGER)
+        areas = {a['id']: a['label'] for a in self.problem_areas()}
+        tickets = dict(self.session.execute(select(Issue.id, Issue.ticket)).all())
+        tz = self.app.dm.timezone
+        now = utcnow()
+
+        def _t(value):
+            value = as_utc(value)
+            return value.astimezone(tz).strftime('%Y-%m-%d %H:%M') if value else ''
+
+        rows = []
+        for i in self._period_issues(start, end, instrument_id, include_imported):
+            res = i.resolution or {}
+            down = mi_insights.hours(mi_insights.merge_intervals(
+                [(as_utc(d.start), as_utc(d.end) if d.end else now)
+                 for d in i.downtimes if d.state == 'unavailable']))
+            response = restoration = ''
+            if i.acknowledged_at and not i.imported:
+                response = round((as_utc(i.acknowledged_at) - as_utc(i.reported_at)).total_seconds() / 60, 1)
+            if i.resolved_at and not i.imported:
+                ends = [as_utc(d.end) for d in i.downtimes if d.end]
+                restored = max(ends) if ends else as_utc(i.resolved_at)
+                restoration = round(max(0, (restored - as_utc(i.occurred_at or i.reported_at))
+                                        .total_seconds() / 3600), 2)
+            row = {
+                'ticket': i.ticket, 'reported_at': _t(i.reported_at),
+                'occurred_at': _t(i.occurred_at), 'acknowledged_at': _t(i.acknowledged_at),
+                'resolved_at': _t(i.resolved_at), 'closed_at': _t(i.closed_at),
+                'instrument': i.instrument_name,
+                'problem_area': areas.get(i.problem_area, i.problem_area),
+                'symptoms': '; '.join(s.label for s in i.symptoms),
+                'severity': i.severity, 'status': i.status,
+                'instrument_state': i.instrument_state, 'title': i.title,
+                'assignee': i.assignee_name or '',
+                'affected_users': len(i.affected),
+                'response_min': response, 'restoration_h': restoration,
+                'downtime_h': round(down, 2) if down else '',
+                'resolution_type': res.get('resolution_type', ''),
+                'root_cause': res.get('root_cause', ''),
+                'resolution_notes': res.get('resolution_notes', ''),
+                'time_lost_min': res.get('time_lost_min') if res.get('time_lost_min') is not None else '',
+                'data_lost': 'yes' if res.get('data_lost') else '',
+                'vendor_ref': res.get('vendor_ref', ''),
+                'duplicate_of': tickets.get(i.duplicate_of_id, ''),
+                'imported': 'yes' if i.imported else '',
+                'reporter': i.reporter_name if STAFF in roles else '',
+                'reporter_email': i.reporter_email if STAFF in roles else '',
+            }
+            rows.append(row)
+        return rows
+
+    def enqueue_weekly_summary(self, now=None):
+        """ Queue the weekly summary for the previous Monday-Sunday once
+        Monday 07:00 facility time has passed. Safe to call repeatedly: the
+        dedupe key makes it once per week and recipient. """
+        recipients = self.notification_settings().get('summary_email') or []
+        if not recipients:
+            return 0
+        tz = self.app.dm.timezone
+        now_local = (now or utcnow()).astimezone(tz)
+        monday = now_local.date() - dt.timedelta(days=now_local.weekday())
+        if now_local < dt.datetime.combine(monday, dt.time(7), tz):
+            monday -= dt.timedelta(days=7)
+        start = dt.datetime.combine(monday - dt.timedelta(days=7), dt.time(), tz)
+        week = start.strftime('%G-W%V')
+        count = 0
+        for dest in recipients:
+            key = f'summary:{week}:{dest}'[:128]
+            exists = self.session.scalars(select(OutboxMessage.id).where(
+                OutboxMessage.dedupe_key == key)).first()
+            if exists:
+                continue
+            self.session.add(OutboxMessage(
+                kind='summary', channel='email', destination=dest, dedupe_key=key,
+                payload={'start': start.date().isoformat(),
+                         'end': (start.date() + dt.timedelta(days=6)).isoformat(),
+                         'week': week}))
+            try:
+                self.session.commit()
+                count += 1
+            except IntegrityError:  # another worker queued it first
+                self.session.rollback()
         return count
 
     # ------------------------- Serialization ---------------------------------

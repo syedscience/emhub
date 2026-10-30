@@ -96,7 +96,47 @@ class NotificationWorker:
         areas = {a['id']: a['label'] for a in self.svc.problem_areas()}
         return areas.get(issue.problem_area, issue.problem_area)
 
+    def build_summary(self, msg):
+        """ Weekly summary email, computed when it is sent. """
+        tz = self.app.dm.timezone
+        p = msg.payload or {}
+        start, end = self.svc.parse_period(p.get('start'), p.get('end'))
+        data = self.svc.insights(start, end, check_access=False)
+        t = data['totals']
+
+        def _num(v, unit):
+            return f'{v:.0f} {unit}' if v is not None else 'n/a'
+
+        lines = [f"Microscope Issues: week {p.get('week', '')} "
+                 f"({p.get('start')} to {p.get('end')})", '',
+                 f"New incidents:        {t['incidents']} (+{t['duplicates']} duplicates)",
+                 f"Open now:             {t['open_now']}",
+                 f"First response:       median {_num(t['response_min']['median'], 'min')}, "
+                 f"90% within {_num(t['response_min']['p90'], 'min')} "
+                 f"(n={t['response_min']['n']})",
+                 f"Restoration:          median {_num(t['restoration_h']['median'], 'h')} "
+                 f"(n={t['restoration_h']['n']})",
+                 f"Unavailable time:     {t['downtime_hours']} h",
+                 f"Escalations:          {t['escalated']}", '',
+                 'Per instrument (incidents / booked h / unavailable h):']
+        for r in data['per_instrument']:
+            if r['incidents'] or r['downtime_hours'] or r['open']:
+                lines.append(f"  {r['name']:20s} {r['incidents']:3d} / "
+                             f"{r['booked_hours'] or 0:6.1f} / {r['downtime_hours']:6.1f}"
+                             f"   ({r['open']} open)")
+        oldest = data['backlog']['oldest'][:5]
+        if oldest:
+            lines += ['', 'Oldest open issues:']
+            for i in oldest:
+                age = (utcnow() - as_utc(i.reported_at)).days
+                lines.append(f'  {i.ticket} {i.instrument_name}: {i.title} ({age} days)')
+        base = (self.app.config.get('ISSUES_BASE_URL') or '').rstrip('/')
+        lines += ['', f'Insights: {base}/main?content_id=mi_insights']
+        return f"[EMhub] Microscope Issues weekly summary {p.get('week', '')}", '\n'.join(lines)
+
     def build_email(self, msg, issue, event):
+        if msg.kind == 'summary':
+            return self.build_summary(msg)
         if msg.kind == 'test':
             return ('[EMhub Microscope Issues] Test message',
                     'This is a test message from the EMhub Microscope Issues module.\n'
@@ -282,6 +322,7 @@ class NotificationWorker:
         with self.app.app_context():
             try:
                 escalated = self.svc.escalate_overdue()
+                self.svc.enqueue_weekly_summary()
                 stats = self.process_outbox()
             finally:
                 self.svc.db.remove()

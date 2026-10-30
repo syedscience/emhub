@@ -26,11 +26,14 @@ EMhub pages (content_id -> template) of the Microscope Issues module:
     mi_issues    Issue list, the landing page of the Microscope Issues tab
     mi_report    Report a new issue (optional resource_id preselects it)
     mi_issue     Issue detail, history, comments, files and staff actions
+    mi_insights  Insights for managers: trends, response, downtime, backlog
     mi_settings  Admin settings: notifications, instruments, delivery health
 """
 
+import datetime as dt
+
 from .api import csrf_token
-from .authz import STAFF, ADMIN, require
+from .authz import STAFF, MANAGER, ADMIN, require
 
 
 def register_content(dc):
@@ -69,8 +72,31 @@ def register_content(dc):
             'severities': svc.severities(),
             'areas': {a['id']: a['label'] for a in svc.problem_areas()},
             'is_staff': STAFF in roles,
+            'is_manager': MANAGER in roles,
             'is_admin': ADMIN in roles,
             'csrf_token': csrf_token(),
+        }
+
+    @dc.content
+    def mi_insights(**kwargs):
+        svc = _svc()
+        require(svc.roles(), MANAGER)
+        start, end = svc.parse_period(kwargs.get('start') or None, kwargs.get('end') or None,
+                                      days=_int(kwargs.get('days')) or 90)
+        instrument_id = _int(kwargs.get('instrument_id'))
+        include_imported = kwargs.get('imported', '1') not in ('0', 'false')
+        data = svc.insights(start, end, instrument_id, include_imported)
+        tz = dc.app.dm.timezone
+        filters = {'start': start.astimezone(tz).date().isoformat(),
+                   'end': (end.astimezone(tz) - dt.timedelta(days=1)).date().isoformat(),
+                   'instrument_id': instrument_id or '',
+                   'imported': '1' if include_imported else '0'}
+        return {
+            'data': data,
+            'filters': filters,
+            'instruments': svc.instruments(reportable_only=False, sync=False),
+            'severities': svc.severities(),
+            'outbox': svc.outbox_summary(check_access=False),
         }
 
     @dc.content
