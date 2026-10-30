@@ -23,12 +23,14 @@
 """
 EMhub pages (content_id -> template) of the Microscope Issues module:
 
-    mi_issues   Issue list, the landing page of the Microscope Issues tab
-    mi_report   Report a new issue (optional resource_id preselects it)
-    mi_issue    Issue detail and history
+    mi_issues    Issue list, the landing page of the Microscope Issues tab
+    mi_report    Report a new issue (optional resource_id preselects it)
+    mi_issue     Issue detail, history, comments, files and staff actions
+    mi_settings  Admin settings: notifications, instruments, delivery health
 """
 
 from .api import csrf_token
+from .authz import STAFF, ADMIN, require
 
 
 def register_content(dc):
@@ -48,21 +50,27 @@ def register_content(dc):
     @dc.content
     def mi_issues(**kwargs):
         svc = _svc()
+        roles = svc.roles()
         status = kwargs.get('status', 'open')
         instrument_id = _int(kwargs.get('instrument_id'))
         mine = kwargs.get('mine') in ('1', 'true')
+        assigned = kwargs.get('assigned') if STAFF in roles else None
         issues = svc.list_issues(status=None if status == 'all' else status,
-                                 instrument_id=instrument_id, mine=mine)
+                                 instrument_id=instrument_id, mine=mine,
+                                 assigned=assigned)
         instruments = svc.instruments(reportable_only=False)
         return {
             'issues': [svc.issue_json(i) for i in issues],
             'instruments': [i for i in instruments if i.is_reportable],
             'open_counts': svc.counts(),
+            'notices': [svc.notice_json(n) for n in svc.notices()],
             'filters': {'status': status, 'instrument_id': instrument_id,
-                        'mine': mine},
+                        'mine': mine, 'assigned': assigned},
             'severities': svc.severities(),
             'areas': {a['id']: a['label'] for a in svc.problem_areas()},
-            'issue_roles': svc.roles(),
+            'is_staff': STAFF in roles,
+            'is_admin': ADMIN in roles,
+            'csrf_token': csrf_token(),
         }
 
     @dc.content
@@ -81,12 +89,33 @@ def register_content(dc):
     @dc.content
     def mi_issue(**kwargs):
         svc = _svc()
+        roles = svc.roles()
         issue = svc.get_issue(kwargs.get('issue_id'))
         data = svc.issue_json(issue, detail=True)
+        kb = svc.knowledge()
         return {
             'issue': data,
             'created': kwargs.get('created') == '1' and data['is_mine'],
             'severities': svc.severities(),
             'areas': {a['id']: a['label'] for a in svc.problem_areas()},
-            'issue_roles': svc.roles(),
+            'staff': svc.staff_users() if STAFF in roles else [],
+            'resolution_types': kb['resolution_types'],
+            'root_causes': kb['root_causes'],
+            'notices': [svc.notice_json(n) for n in svc.notices(issue.instrument_id)],
+            'is_staff': STAFF in roles,
+            'csrf_token': csrf_token(),
+        }
+
+    @dc.content
+    def mi_settings(**kwargs):
+        svc = _svc()
+        require(svc.roles(), ADMIN)
+        outbox = svc.outbox_summary()
+        return {
+            'notifications': svc.notification_settings(),
+            'webhooks': svc.webhook_names(),
+            'instruments': svc.instruments(reportable_only=False),
+            'severities': svc.severities(),
+            'outbox': outbox,
+            'csrf_token': csrf_token(),
         }

@@ -37,7 +37,7 @@ import flask_login
 from sqlalchemy.orm.exc import StaleDataError
 
 from .authz import Forbidden, ADMIN
-from .service import ValidationError, NotFound
+from .service import ValidationError, NotFound, Conflict
 
 issues_bp = flask.Blueprint('issues_api', __name__)
 
@@ -88,6 +88,7 @@ def _invalid(e):
     return _error('Please correct the highlighted fields.', 422, e.errors)
 
 
+@issues_bp.errorhandler(Conflict)
 @issues_bp.errorhandler(StaleDataError)
 def _conflict(e):
     _service().session.rollback()
@@ -166,3 +167,125 @@ def update_instrument(instrument_id):
         raise ValidationError({'enabled': 'Required.'})
     inst = _service().set_instrument_enabled(instrument_id, data['enabled'])
     return flask.jsonify({'instrument': inst.json()})
+
+
+@issues_bp.route('/issues/<int:issue_id>/transition', methods=['POST'])
+def transition(issue_id):
+    svc = _service()
+    data = _json_body()
+    issue = svc.transition(issue_id, data.get('action'), data)
+    return flask.jsonify({'issue': svc.issue_json(issue, detail=True)})
+
+
+@issues_bp.route('/issues/<int:issue_id>/update', methods=['POST'])
+def update_issue(issue_id):
+    svc = _service()
+    issue = svc.update_issue(issue_id, _json_body())
+    return flask.jsonify({'issue': svc.issue_json(issue, detail=True)})
+
+
+@issues_bp.route('/issues/<int:issue_id>/comments', methods=['POST'])
+def add_comment(issue_id):
+    svc = _service()
+    data = _json_body()
+    svc.add_comment(issue_id, data.get('text'), bool(data.get('internal')))
+    return flask.jsonify({'issue': svc.issue_json(svc.get_issue(issue_id), detail=True)}), 201
+
+
+@issues_bp.route('/issues/<int:issue_id>/join', methods=['POST'])
+def join_issue(issue_id):
+    svc = _service()
+    issue = svc.join_issue(issue_id)
+    return flask.jsonify({'issue': svc.issue_json(issue, detail=True)})
+
+
+@issues_bp.route('/issues/<int:issue_id>/attachments', methods=['POST'])
+def add_attachments(issue_id):
+    svc = _service()
+    files = flask.request.files.getlist('file')
+    if not files:
+        raise ValidationError({'file': 'Select a file to upload.'})
+    internal = flask.request.form.get('internal') in ('1', 'true')
+    for f in files:
+        svc.add_attachment(issue_id, f.filename, f.stream, internal=internal)
+    return flask.jsonify({'issue': svc.issue_json(svc.get_issue(issue_id), detail=True)}), 201
+
+
+@issues_bp.route('/attachments/<int:attachment_id>', methods=['GET'])
+def get_attachment(attachment_id):
+    att, path = _service().get_attachment(attachment_id)
+    inline = att.content_type.startswith('image/') or att.content_type == 'application/pdf'
+    resp = flask.send_file(path, mimetype=att.content_type,
+                           as_attachment=not inline, download_name=att.filename)
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    resp.headers['Content-Security-Policy'] = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'"
+    resp.headers['Cache-Control'] = 'private, no-store'
+    return resp
+
+
+@issues_bp.route('/duplicates', methods=['GET'])
+def duplicates():
+    svc = _service()
+    args = flask.request.args
+    try:
+        instrument_id = int(args.get('instrument_id', ''))
+    except ValueError:
+        raise ValidationError({'instrument_id': 'Must be a number.'})
+    items = svc.duplicates(instrument_id, args.get('problem_area'))
+    return flask.jsonify({'issues': [svc.issue_json(i) for i in items]})
+
+
+@issues_bp.route('/staff', methods=['GET'])
+def staff():
+    svc = _service()
+    from .authz import require, STAFF
+    require(svc.roles(), STAFF)
+    return flask.jsonify({'staff': [{'id': u['id'], 'name': u['name']}
+                                    for u in svc.staff_users()]})
+
+
+@issues_bp.route('/notices', methods=['GET'])
+def notices():
+    svc = _service()
+    return flask.jsonify({'notices': [svc.notice_json(n) for n in
+                                      svc.notices(flask.request.args.get('instrument_id'))]})
+
+
+@issues_bp.route('/notices', methods=['POST'])
+def create_notice():
+    svc = _service()
+    return flask.jsonify({'notice': svc.notice_json(svc.create_notice(_json_body()))}), 201
+
+
+@issues_bp.route('/notices/<int:notice_id>/remove', methods=['POST'])
+def remove_notice(notice_id):
+    svc = _service()
+    return flask.jsonify({'notice': svc.notice_json(svc.deactivate_notice(notice_id))})
+
+
+@issues_bp.route('/settings', methods=['GET'])
+def get_settings():
+    svc = _service()
+    from .authz import require
+    require(svc.roles(), ADMIN)
+    return flask.jsonify({'notifications': svc.notification_settings(),
+                          'webhooks': svc.webhook_names()})
+
+
+@issues_bp.route('/settings', methods=['POST'])
+def save_settings():
+    svc = _service()
+    return flask.jsonify({'notifications': svc.save_settings(_json_body())})
+
+
+@issues_bp.route('/settings/test', methods=['POST'])
+def send_test():
+    data = _json_body()
+    msg = _service().send_test(data.get('channel'), data.get('destination'))
+    return flask.jsonify({'message_id': msg.id}), 201
+
+
+@issues_bp.route('/outbox/<int:message_id>/retry', methods=['POST'])
+def retry_message(message_id):
+    msg = _service().retry_message(message_id)
+    return flask.jsonify({'message_id': msg.id, 'status': msg.status})

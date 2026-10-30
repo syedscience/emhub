@@ -54,11 +54,12 @@ def init_issues(app):
     """
     from .db import IssuesDb
     from .service import IssuesService
-    from .api import issues_bp
+    from .api import issues_bp, csrf_token
     from .content import register_content
 
     app.issues = IssuesService(app, IssuesDb(get_db_url(app)))
     app.register_blueprint(issues_bp, url_prefix='/api/mi')
+    app.jinja_env.globals['mi_csrf_token'] = csrf_token
     register_content(app.dc)
 
     @app.teardown_appcontext

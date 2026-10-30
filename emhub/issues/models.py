@@ -133,6 +133,12 @@ class Issue(Base):
                             order_by='IssueSymptom.id')
     events = relationship('IssueEvent', cascade='all, delete-orphan',
                           order_by='IssueEvent.id')
+    affected = relationship('AffectedUser', cascade='all, delete-orphan',
+                            order_by='AffectedUser.id')
+    attachments = relationship('Attachment', cascade='all, delete-orphan',
+                               order_by='Attachment.id')
+    downtimes = relationship('DowntimeInterval', cascade='all, delete-orphan',
+                             order_by='DowntimeInterval.id')
 
     __mapper_args__ = {'version_id_col': version}
     __table_args__ = (
@@ -182,10 +188,12 @@ class OutboxMessage(Base):
     STATUSES = ['queued', 'sending', 'accepted', 'retrying', 'failed', 'skipped']
 
     id = Column(Integer, primary_key=True)
+    # Empty for test messages sent from the settings page
     issue_id = Column(Integer, ForeignKey('mi_issues.id', ondelete='CASCADE'),
-                      nullable=False, index=True)
+                      index=True)
     event_id = Column(Integer, ForeignKey('mi_issue_events.id', ondelete='CASCADE'))
-    channel = Column(String(16), nullable=False)  # email | webhook
+    kind = Column(String(32), nullable=False, default='created')  # event kind or 'test'
+    channel = Column(String(16), nullable=False)  # email | receipt | webhook
     destination = Column(String(512), nullable=False)
     dedupe_key = Column(String(128), nullable=False, unique=True)
     status = Column(String(16), nullable=False, default='queued')
@@ -196,3 +204,83 @@ class OutboxMessage(Base):
     sent_at = Column(UtcDateTime)
 
     __table_args__ = (Index('ix_mi_outbox_status_next', 'status', 'next_attempt_at'),)
+
+
+class AffectedUser(Base):
+    """ Other users hit by the same problem ("I'm also affected"). """
+    __tablename__ = 'mi_affected_users'
+
+    id = Column(Integer, primary_key=True)
+    issue_id = Column(Integer, ForeignKey('mi_issues.id', ondelete='CASCADE'),
+                      nullable=False, index=True)
+    user_id = Column(Integer, nullable=False)
+    user_name = Column(String(256), nullable=False)
+    user_email = Column(String(128), nullable=False, default='')
+    joined_at = Column(UtcDateTime, nullable=False, default=utcnow)
+
+    __table_args__ = (UniqueConstraint('issue_id', 'user_id'),)
+
+
+class Attachment(Base):
+    """ File attached to an issue. The file itself is stored on disk
+    (ISSUES_FILES folder) under a random name; only metadata is here. """
+    __tablename__ = 'mi_attachments'
+
+    id = Column(Integer, primary_key=True)
+    issue_id = Column(Integer, ForeignKey('mi_issues.id', ondelete='CASCADE'),
+                      nullable=False, index=True)
+    filename = Column(String(256), nullable=False)  # sanitized original name
+    stored_name = Column(String(64), nullable=False, unique=True)
+    content_type = Column(String(128), nullable=False)
+    size = Column(Integer, nullable=False)
+    internal = Column(Boolean, nullable=False, default=False)  # staff-only
+    uploaded_by_id = Column(Integer, nullable=False)
+    uploaded_by_name = Column(String(256), nullable=False)
+    uploaded_at = Column(UtcDateTime, nullable=False, default=utcnow)
+
+
+class DowntimeInterval(Base):
+    """ Period when an instrument was degraded or unavailable because of an
+    issue. 'end' is empty while it lasts. Kept separate from the ticket
+    status so restoration time is measured independently of closure. """
+    __tablename__ = 'mi_downtime'
+
+    id = Column(Integer, primary_key=True)
+    issue_id = Column(Integer, ForeignKey('mi_issues.id', ondelete='CASCADE'),
+                      nullable=False, index=True)
+    instrument_id = Column(Integer, ForeignKey('mi_instruments.id'), nullable=False)
+    state = Column(String(16), nullable=False)  # degraded | unavailable
+    start = Column(UtcDateTime, nullable=False)
+    end = Column(UtcDateTime)
+
+    __table_args__ = (Index('ix_mi_downtime_instrument', 'instrument_id', 'start'),)
+
+
+class Notice(Base):
+    """ Service notice shown to users, e.g. 'Krios01 down until Friday'. """
+    __tablename__ = 'mi_notices'
+
+    LEVELS = ['info', 'warning', 'danger']
+
+    id = Column(Integer, primary_key=True)
+    instrument_id = Column(Integer, ForeignKey('mi_instruments.id'))  # empty: all
+    message = Column(String(1000), nullable=False)
+    level = Column(String(16), nullable=False, default='warning')
+    active = Column(Boolean, nullable=False, default=True)
+    created_by_name = Column(String(256), nullable=False)
+    created_at = Column(UtcDateTime, nullable=False, default=utcnow)
+    expires_at = Column(UtcDateTime)
+
+    instrument = relationship('Instrument')
+
+
+class AuditEvent(Base):
+    """ Changes to module settings (routing, instruments, notices). """
+    __tablename__ = 'mi_audit'
+
+    id = Column(Integer, primary_key=True)
+    at = Column(UtcDateTime, nullable=False, default=utcnow)
+    actor_id = Column(Integer)
+    actor_name = Column(String(256), nullable=False, default='')
+    action = Column(String(64), nullable=False)
+    data = Column(JSON, nullable=False, default=dict)

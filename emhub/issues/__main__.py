@@ -27,6 +27,7 @@ Command line tool for the Microscope Issues module.
     emh-issues status             Show database URL and schema revision
     emh-issues sync-instruments   Copy EMhub resources into the issues database
     emh-issues init-config        Create the 'config:issues' form with defaults
+    emh-issues worker [--once]    Send notifications and escalate overdue issues
 
 EMHUB_INSTANCE must point to the EMhub instance folder.
 """
@@ -59,6 +60,9 @@ def main():
     sub.add_parser('status', help='Show the database and schema revision.')
     sub.add_parser('sync-instruments', help='Copy EMhub resources as instruments.')
     sub.add_parser('init-config', help="Create the 'config:issues' form with defaults.")
+    w = sub.add_parser('worker', help='Send notifications and escalate overdue issues.')
+    w.add_argument('--once', action='store_true', help='Process once and exit.')
+    w.add_argument('--interval', type=int, default=10, help='Seconds between runs.')
     args = p.parse_args()
 
     app = _app()
@@ -99,6 +103,21 @@ def main():
             app.dm.create_form(name='config:issues', definition=DEFAULT_CONFIG)
             print(f"Created form 'config:issues' (as admin '{admin.username}'). "
                   f"Edit it in EMhub under Forms.")
+
+    elif args.command == 'worker':
+        import logging
+        from .worker import NotificationWorker
+        if app.issues is None:
+            sys.exit("Set EMHUB_ISSUES = True in the instance config.py first.")
+        if not db.is_current():
+            sys.exit("The issues database is not up to date, run 'emh-issues migrate'.")
+        logging.basicConfig(level=logging.INFO,
+                            format='%(asctime)s %(levelname)s %(message)s')
+        worker = NotificationWorker(app)
+        if args.once:
+            print(worker.run_once())
+        else:
+            worker.run_forever(args.interval)
 
 
 if __name__ == '__main__':

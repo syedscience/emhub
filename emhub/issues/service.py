@@ -32,15 +32,18 @@ import datetime as dt
 import json
 import os
 import re
+import uuid
 
 import flask
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
+from werkzeug.utils import secure_filename
 
 from .authz import (user_issue_roles, require, Forbidden,
                     REPORTER, STAFF, ADMIN)
 from .models import (Instrument, Issue, IssueSymptom, IssueEvent,
-                     OutboxMessage, as_utc, utcnow)
+                     OutboxMessage, AffectedUser, Attachment,
+                     DowntimeInterval, Notice, AuditEvent, as_utc, utcnow)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 KNOWLEDGE_FILE = os.path.join(HERE, 'knowledge', 'problem_areas.json')
@@ -55,6 +58,54 @@ TYPE_TAGS = [
               'coater', 'plasma', 'hpf'}),
 ]
 
+# action: (allowed current statuses, new status, required role)
+TRANSITIONS = {
+    'acknowledge': ({'new', 'reopened'}, 'acknowledged', STAFF),
+    'investigate': ({'new', 'acknowledged', 'reopened', 'waiting_vendor'},
+                    'investigating', STAFF),
+    'wait_vendor': ({'new', 'acknowledged', 'investigating', 'reopened'},
+                    'waiting_vendor', STAFF),
+    'resolve': (set(Issue.OPEN_STATUSES), 'resolved', STAFF),
+    'close': ({'resolved'}, 'closed', STAFF),
+    'reopen': ({'resolved', 'closed'}, 'reopened', 'participant'),
+    'duplicate': (set(Issue.OPEN_STATUSES), 'duplicate', STAFF),
+}
+
+MAX_FILES_PER_ISSUE = 20
+EMAIL_RE = re.compile(r'^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$')
+
+# Allowed attachments: extension -> (content type, magic bytes or None for text)
+FILE_TYPES = {
+    'png': ('image/png', [b'\x89PNG\r\n\x1a\n']),
+    'jpg': ('image/jpeg', [b'\xff\xd8\xff']),
+    'jpeg': ('image/jpeg', [b'\xff\xd8\xff']),
+    'gif': ('image/gif', [b'GIF87a', b'GIF89a']),
+    'pdf': ('application/pdf', [b'%PDF-']),
+    'txt': ('text/plain', None),
+    'log': ('text/plain', None),
+    'csv': ('text/csv', None),
+    'json': ('application/json', None),
+}
+
+
+def sniff_content_type(ext, data):
+    """ Return the content type if the file content matches its extension. """
+    if ext not in FILE_TYPES:
+        return None
+    content_type, magics = FILE_TYPES[ext]
+    if magics is None:  # text files: must be valid UTF-8 without NUL bytes
+        head = data[:65536]
+        if b'\x00' in head:
+            return None
+        try:
+            head.decode('utf-8')
+        except UnicodeDecodeError as e:
+            if e.start < len(head) - 4:  # allow a character cut at the end
+                return None
+        return content_type
+    return content_type if any(data.startswith(m) for m in magics) else None
+
+
 LIMITS = {'title': 200, 'description': 10000, 'tried': 5000, 'contact': 256}
 CONTEXT_FIELDS = ['detector', 'software', 'session_type', 'session_status',
                   'onset', 'booking_id', 'session_id']
@@ -66,8 +117,13 @@ DEFAULT_CONFIG = {
     'roles': {'staff': [], 'manager': [], 'admin': []},
     'notifications': {
         'email': [],            # facility addresses notified of new issues
-        'webhooks': [],         # [{"name": "...", "url": "..."}] e.g. Teams Workflows
+        'webhooks': [],         # names of server-side webhooks (ISSUES_WEBHOOKS)
         'receipt_to_reporter': True,
+        'notify_reporter': True,  # email reporters about progress and staff replies
+        'escalation': {'email': [], 'webhooks': []},  # when not acknowledged in time
+        'routes': [],           # [{"instruments": [...], "min_severity": "blocked",
+                                #   "email": [...], "webhooks": [...]}]
+        'ack_minutes': {},      # per severity, defaults from problem_areas.json
     },
 }
 
@@ -79,6 +135,11 @@ class ValidationError(Exception):
 
 
 class NotFound(Exception):
+    pass
+
+
+class Conflict(Exception):
+    """ The issue changed since the user loaded it (optimistic locking). """
     pass
 
 
@@ -189,6 +250,8 @@ class IssuesService:
         if inst is None:
             raise NotFound(f'Instrument {instrument_id} not found')
         inst.enabled = bool(enabled)
+        self._audit(user if user is not None else self.app.user, 'instrument_enabled',
+                    {'instrument': inst.name, 'enabled': inst.enabled})
         self.session.commit()
         return inst
 
@@ -315,9 +378,9 @@ class IssuesService:
                                actor_name=user.name, kind='created',
                                data={'severity': severity,
                                      'bumped_from': bumped_from})
-            s.add(event)
+            issue.events.append(event)
             s.flush()
-            self._enqueue_notifications(issue, event)
+            self._notify(issue, event, user)
             s.commit()
         except IntegrityError:
             s.rollback()
@@ -331,22 +394,6 @@ class IssuesService:
         return self.session.scalars(
             select(Issue).where(Issue.idempotency_key == key)).first()
 
-    def _enqueue_notifications(self, issue, event):
-        """ Queue one outbox message per destination. Delivery is done
-        later by the worker, so a mail/Teams outage never loses a report. """
-        notif = self.config().get('notifications', {})
-        targets = [('email', addr) for addr in notif.get('email', [])]
-        targets += [('webhook', w['name']) for w in notif.get('webhooks', [])
-                    if isinstance(w, dict) and w.get('name')]
-        if notif.get('receipt_to_reporter', True) and issue.reporter_email:
-            targets.append(('receipt', issue.reporter_email))
-
-        for channel, dest in dict.fromkeys(targets):
-            self.session.add(OutboxMessage(
-                issue_id=issue.id, event_id=event.id, channel=channel,
-                destination=dest,
-                dedupe_key=f'{issue.id}:{event.id}:{channel}:{dest}'[:128]))
-
     def get_issue(self, issue_id, user=None):
         user = user if user is not None else self.app.user
         roles = self.roles(user)
@@ -359,10 +406,18 @@ class IssuesService:
             raise NotFound(f'Issue {issue_id} not found')
         return issue
 
+    def _find_issue(self, ref):
+        """ Find an issue by id or ticket number (for duplicate links). """
+        ref = str(ref or '').strip()
+        if ref.isdigit():
+            return self.session.get(Issue, int(ref))
+        return self.session.scalars(
+            select(Issue).where(Issue.ticket == ref.upper())).first()
+
     def list_issues(self, user=None, status=None, instrument_id=None,
-                    mine=False, limit=500):
+                    mine=False, assigned=None, limit=500):
         """ Return issues, newest first. status can be 'open', 'closed',
-        a single status or None for all. """
+        a single status or None for all. assigned can be 'me' or 'none'. """
         user = user if user is not None else self.app.user
         require(self.roles(user), REPORTER)
         q = select(Issue).order_by(Issue.reported_at.desc(), Issue.id.desc())
@@ -376,6 +431,10 @@ class IssuesService:
             q = q.where(Issue.instrument_id == int(instrument_id))
         if mine:
             q = q.where(Issue.reporter_id == user.id)
+        if assigned == 'me':
+            q = q.where(Issue.assignee_id == user.id)
+        elif assigned == 'none':
+            q = q.where(Issue.assignee_id.is_(None))
         return list(self.session.scalars(q.limit(limit)))
 
     def counts(self):
@@ -384,6 +443,631 @@ class IssuesService:
              .where(Issue.status.in_(Issue.OPEN_STATUSES))
              .group_by(Issue.instrument_id))
         return dict(self.session.execute(q).all())
+
+    def duplicates(self, instrument_id, problem_area=None, user=None):
+        """ Open issues on the same instrument, same problem area first,
+        so reporters can join an existing issue instead of a new one. """
+        require(self.roles(user), REPORTER)
+        q = (select(Issue)
+             .where(Issue.instrument_id == int(instrument_id),
+                    Issue.status.in_(Issue.OPEN_STATUSES))
+             .order_by(Issue.reported_at.desc()).limit(20))
+        items = list(self.session.scalars(q))
+        items.sort(key=lambda i: i.problem_area != problem_area)
+        return items
+
+    # ------------------------- Workflow --------------------------------------
+    def is_participant(self, issue, user=None, roles=None):
+        """ Staff, the reporter and users who joined the issue. """
+        user = user if user is not None else self.app.user
+        roles = roles if roles is not None else self.roles(user)
+        return (STAFF in roles or issue.reporter_id == user.id
+                or any(a.user_id == user.id for a in issue.affected))
+
+    def _check_version(self, issue, payload):
+        version = payload.get('version')
+        if version is None or str(version) != str(issue.version):
+            raise Conflict()
+
+    def _add_event(self, issue, user, kind, data=None, internal=False, at=None):
+        roles = self.roles(user) if user is not None else set()
+        data = dict(data or {})
+        if STAFF in roles:
+            data['by_staff'] = True
+        event = IssueEvent(issue_id=issue.id, at=at or utcnow(),
+                           actor_id=getattr(user, 'id', None),
+                           actor_name=getattr(user, 'name', None) or 'EMhub',
+                           kind=kind, data=data, internal=internal)
+        issue.events.append(event)  # keep the loaded history up to date
+        self.session.flush()
+        if not internal:
+            self._notify(issue, event, user)
+        return event
+
+    def transition(self, issue_id, action, payload=None, user=None):
+        """ Move an issue through the workflow:
+        new -> acknowledged -> investigating -> waiting_vendor -> resolved
+        -> closed, plus reopen and duplicate. """
+        user = user if user is not None else self.app.user
+        roles = self.roles(user)
+        payload = payload or {}
+        issue = self.get_issue(issue_id, user)
+
+        if action not in TRANSITIONS:
+            raise ValidationError({'action': f"Unknown action '{action}'."})
+        allowed_from, new_status, role = TRANSITIONS[action]
+        if role == 'participant':
+            if not self.is_participant(issue, user, roles):
+                raise Forbidden('Only staff or people affected by this issue can do this.')
+        else:
+            require(roles, role)
+        if issue.status not in allowed_from:
+            raise ValidationError({'action': f"Cannot {action.replace('_', ' ')} "
+                                             f"an issue that is {issue.status}."})
+        self._check_version(issue, payload)
+
+        now = utcnow()
+        old_status = issue.status
+        data = {'from': old_status, 'to': new_status}
+        errors = {}
+
+        if action == 'resolve':
+            resolution = self._clean_resolution(payload, errors)
+            restored_at = self._parse_time(payload.get('restored_at'), 'restored_at', errors) or now
+            if errors:
+                raise ValidationError(errors)
+            issue.resolution = resolution
+            issue.resolved_at = now
+            if issue.instrument_state in ('degraded', 'unavailable'):
+                self._set_instrument_state(issue, 'operational', restored_at)
+            data['resolution'] = resolution
+        elif action == 'reopen':
+            reason = str(payload.get('reason') or '').strip()
+            if not reason:
+                raise ValidationError({'reason': 'Explain why the issue is reopened.'})
+            data['reason'] = reason[:2000]
+            data['previous_resolution'] = issue.resolution
+            issue.resolution = {}
+            issue.resolved_at = issue.closed_at = None
+        elif action == 'close':
+            issue.closed_at = now
+        elif action == 'duplicate':
+            target = self._find_issue(payload.get('duplicate_of'))
+            if target is None or target.id == issue.id or target.status == 'duplicate':
+                raise ValidationError({'duplicate_of': 'Enter the ticket of another, '
+                                                      'non-duplicate issue.'})
+            issue.duplicate_of_id = target.id
+            issue.closed_at = now
+            data['duplicate_of'] = target.ticket
+            self._add_affected(target, issue.reporter_id, issue.reporter_name,
+                               issue.reporter_email)
+            self._add_event(target, user, 'duplicate_merged',
+                            {'ticket': issue.ticket, 'reporter': issue.reporter_name},
+                            internal=True)
+        elif action == 'wait_vendor':
+            if vendor_ref := str(payload.get('vendor_ref') or '').strip()[:128]:
+                issue.resolution = dict(issue.resolution or {}, vendor_ref=vendor_ref)
+                data['vendor_ref'] = vendor_ref
+
+        # The first staff action counts as the acknowledgement
+        if STAFF in roles and issue.acknowledged_at is None and action != 'reopen':
+            issue.acknowledged_at = now
+        if action == 'acknowledge' and issue.assignee_id is None:
+            issue.assignee_id, issue.assignee_name = user.id, user.name
+
+        issue.status = new_status
+        self._add_event(issue, user, action if action != 'wait_vendor' else 'waiting_vendor', data)
+        self.session.commit()
+        return issue
+
+    def _clean_resolution(self, payload, errors):
+        kb = self.knowledge()
+        res = {}
+        rtype, cause = payload.get('resolution_type'), payload.get('root_cause')
+        if rtype not in kb['resolution_types']:
+            errors['resolution_type'] = 'Select how the issue was resolved.'
+        if cause not in kb['root_causes']:
+            errors['root_cause'] = 'Select the root cause (or Unknown).'
+        notes = str(payload.get('resolution_notes') or '').strip()
+        if len(notes) > 5000:
+            errors['resolution_notes'] = 'Must be at most 5000 characters.'
+        time_lost = payload.get('time_lost_min')
+        if time_lost not in (None, ''):
+            try:
+                time_lost = int(time_lost)
+                if not 0 <= time_lost <= 100000:
+                    raise ValueError
+            except (TypeError, ValueError):
+                errors['time_lost_min'] = 'Enter minutes as a positive number.'
+                time_lost = None
+        else:
+            time_lost = None
+        res.update(resolution_type=rtype, root_cause=cause,
+                   resolution_notes=notes, time_lost_min=time_lost,
+                   data_lost=bool(payload.get('data_lost')))
+        if vendor_ref := str(payload.get('vendor_ref') or '').strip()[:128]:
+            res['vendor_ref'] = vendor_ref
+        return res
+
+    def _parse_time(self, value, field, errors):
+        sub = {}
+        when = self._parse_occurred_at(value, sub)
+        if sub:
+            errors[field] = sub['occurred_at']
+        return when
+
+    def update_issue(self, issue_id, payload, user=None):
+        """ Staff changes: severity, assignee and instrument state. """
+        user = user if user is not None else self.app.user
+        roles = self.roles(user)
+        require(roles, STAFF)
+        issue = self.get_issue(issue_id, user)
+        self._check_version(issue, payload)
+        changes, errors = {}, {}
+        now = utcnow()
+
+        if 'severity' in payload and payload['severity'] != issue.severity:
+            if payload['severity'] not in self.severities():
+                errors['severity'] = 'Unknown severity.'
+            else:
+                changes['severity'] = [issue.severity, payload['severity']]
+                issue.severity = payload['severity']
+
+        if 'assignee_id' in payload:
+            aid = payload['assignee_id']
+            if aid in (None, '', 0):
+                if issue.assignee_id is not None:
+                    changes['assignee'] = [issue.assignee_name, None]
+                    issue.assignee_id = issue.assignee_name = None
+            else:
+                staff = {u['id']: u for u in self.staff_users()}
+                try:
+                    aid = int(aid)
+                except (TypeError, ValueError):
+                    aid = None
+                if aid not in staff:
+                    errors['assignee_id'] = 'Select a staff member.'
+                elif aid != issue.assignee_id:
+                    changes['assignee'] = [issue.assignee_name, staff[aid]['name']]
+                    issue.assignee_id, issue.assignee_name = aid, staff[aid]['name']
+
+        if 'instrument_state' in payload and payload['instrument_state'] != issue.instrument_state:
+            state = payload['instrument_state']
+            if state not in Issue.INSTRUMENT_STATES:
+                errors['instrument_state'] = 'Unknown instrument state.'
+            else:
+                at = self._parse_time(payload.get('state_since'), 'state_since', errors) or now
+                if not errors:
+                    changes['instrument_state'] = [issue.instrument_state, state]
+                    self._set_instrument_state(issue, state, at)
+
+        if errors:
+            self.session.rollback()
+            raise ValidationError(errors)
+        if changes:
+            if issue.acknowledged_at is None:
+                issue.acknowledged_at = now
+            self._add_event(issue, user, 'updated', {'changes': changes})
+            self.session.commit()
+        return issue
+
+    def _set_instrument_state(self, issue, state, at):
+        """ Track downtime intervals as the instrument state changes. """
+        for d in issue.downtimes:
+            if d.end is None:
+                d.end = max(as_utc(at), as_utc(d.start))
+        if state in ('degraded', 'unavailable'):
+            issue.downtimes.append(DowntimeInterval(
+                instrument_id=issue.instrument_id, state=state, start=at))
+        issue.instrument_state = state
+
+    def add_comment(self, issue_id, text, internal=False, user=None):
+        user = user if user is not None else self.app.user
+        roles = self.roles(user)
+        issue = self.get_issue(issue_id, user)
+        if internal:
+            require(roles, STAFF)
+        elif not self.is_participant(issue, user, roles):
+            raise Forbidden('Join the issue ("I am also affected") to comment on it.')
+        text = str(text or '').strip()
+        if not text:
+            raise ValidationError({'text': 'Write a comment.'})
+        if len(text) > 5000:
+            raise ValidationError({'text': 'Must be at most 5000 characters.'})
+        if STAFF in roles and not internal and issue.acknowledged_at is None:
+            issue.acknowledged_at = utcnow()
+        event = self._add_event(issue, user, 'comment', {'text': text}, internal=bool(internal))
+        self.session.commit()
+        return event
+
+    def _add_affected(self, issue, user_id, name, email):
+        if user_id == issue.reporter_id or any(a.user_id == user_id for a in issue.affected):
+            return False
+        issue.affected.append(AffectedUser(user_id=user_id, user_name=name,
+                                           user_email=email or ''))
+        return True
+
+    def join_issue(self, issue_id, user=None):
+        """ 'I am also affected': follow an open issue instead of reporting
+        a duplicate. """
+        user = user if user is not None else self.app.user
+        require(self.roles(user), REPORTER)
+        issue = self.get_issue(issue_id, user)
+        if not issue.is_open:
+            raise ValidationError({'issue': 'This issue is no longer open.'})
+        if self._add_affected(issue, user.id, user.name, user.email):
+            self._add_event(issue, user, 'affected', internal=True)
+            self.session.commit()
+        return issue
+
+    def staff_users(self):
+        """ Active EMhub users with the staff issue role (assignees). """
+        config = self.config()
+        return sorted(({'id': u.id, 'name': u.name, 'email': u.email}
+                       for u in self.app.dm.get_users()
+                       if STAFF in user_issue_roles(_AsUser(u), config)),
+                      key=lambda u: u['name'])
+
+    # ------------------------- Attachments -----------------------------------
+    def files_folder(self):
+        return self.app.config.get('ISSUES_FILES') or os.path.join(
+            self.app.instance_path, 'issue_files')
+
+    def add_attachment(self, issue_id, filename, stream, internal=False, user=None):
+        user = user if user is not None else self.app.user
+        roles = self.roles(user)
+        issue = self.get_issue(issue_id, user)
+        if internal:
+            require(roles, STAFF)
+        elif not self.is_participant(issue, user, roles):
+            raise Forbidden('Only staff or people affected by this issue can add files.')
+        if len(issue.attachments) >= MAX_FILES_PER_ISSUE:
+            raise ValidationError({'file': f'At most {MAX_FILES_PER_ISSUE} files per issue.'})
+
+        max_bytes = int(self.app.config.get('ISSUES_MAX_FILE_MB', 20)) * 1024 * 1024
+        data = stream.read(max_bytes + 1)
+        if not data:
+            raise ValidationError({'file': 'The file is empty.'})
+        if len(data) > max_bytes:
+            raise ValidationError({'file': f'Files must be smaller than {max_bytes // 1048576} MB.'})
+
+        safe = secure_filename(filename or '') or 'file'
+        ext = safe.rsplit('.', 1)[-1].lower() if '.' in safe else ''
+        content_type = sniff_content_type(ext, data)
+        if content_type is None:
+            raise ValidationError({'file': 'Allowed files: images (PNG, JPEG, GIF), PDF '
+                                           'and text logs (TXT, LOG, CSV, JSON).'})
+
+        stored = uuid.uuid4().hex
+        folder = os.path.join(self.files_folder(), str(issue.id))
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, stored)
+        with open(path, 'wb') as f:
+            f.write(data)
+        try:
+            att = Attachment(filename=safe[:256], stored_name=stored,
+                             content_type=content_type, size=len(data),
+                             internal=bool(internal), uploaded_by_id=user.id,
+                             uploaded_by_name=user.name)
+            issue.attachments.append(att)
+            self._add_event(issue, user, 'attachment', {'filename': att.filename},
+                            internal=True)
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
+            os.remove(path)
+            raise
+        return att
+
+    def get_attachment(self, attachment_id, user=None):
+        """ Return (attachment, path) if the user may download it. """
+        user = user if user is not None else self.app.user
+        roles = self.roles(user)
+        require(roles, REPORTER)
+        att = self.session.get(Attachment, int(attachment_id))
+        if att is None:
+            raise NotFound('File not found')
+        issue = self.session.get(Issue, att.issue_id)
+        if att.internal and STAFF not in roles:
+            raise NotFound('File not found')
+        if not self.is_participant(issue, user, roles):
+            raise Forbidden('Only staff or people affected by this issue can see its files.')
+        return att, os.path.join(self.files_folder(), str(issue.id), att.stored_name)
+
+    # ------------------------- Notices ---------------------------------------
+    def notices(self, instrument_id=None):
+        """ Active, unexpired notices (for one instrument plus global ones). """
+        now = utcnow()
+        q = select(Notice).where(Notice.active.is_(True)).order_by(Notice.created_at.desc())
+        items = [n for n in self.session.scalars(q)
+                 if n.expires_at is None or as_utc(n.expires_at) > now]
+        if instrument_id:
+            items = [n for n in items if n.instrument_id in (None, int(instrument_id))]
+        return items
+
+    def create_notice(self, payload, user=None):
+        user = user if user is not None else self.app.user
+        require(self.roles(user), STAFF)
+        errors = {}
+        message = str(payload.get('message') or '').strip()
+        if not message or len(message) > 1000:
+            errors['message'] = 'Write a message (at most 1000 characters).'
+        level = payload.get('level') or 'warning'
+        if level not in Notice.LEVELS:
+            errors['level'] = 'Unknown level.'
+        inst_id = payload.get('instrument_id') or None
+        if inst_id is not None:
+            try:
+                if self.get_instrument(instrument_id=inst_id) is None:
+                    raise ValueError
+                inst_id = int(inst_id)
+            except (TypeError, ValueError):
+                errors['instrument_id'] = 'Unknown instrument.'
+        expires = None
+        if payload.get('expires_at'):
+            try:
+                expires = dt.datetime.fromisoformat(str(payload['expires_at']))
+                if expires.tzinfo is None:
+                    expires = expires.replace(tzinfo=self.app.dm.timezone)
+                expires = expires.astimezone(dt.timezone.utc)
+            except ValueError:
+                errors['expires_at'] = 'Invalid date/time.'
+        if errors:
+            raise ValidationError(errors)
+        notice = Notice(instrument_id=inst_id, message=message, level=level,
+                        created_by_name=user.name, expires_at=expires)
+        self.session.add(notice)
+        self._audit(user, 'notice_created', {'message': message, 'instrument_id': inst_id})
+        self.session.commit()
+        return notice
+
+    def deactivate_notice(self, notice_id, user=None):
+        user = user if user is not None else self.app.user
+        require(self.roles(user), STAFF)
+        notice = self.session.get(Notice, int(notice_id))
+        if notice is None:
+            raise NotFound('Notice not found')
+        notice.active = False
+        self._audit(user, 'notice_removed', {'id': notice.id})
+        self.session.commit()
+        return notice
+
+    def notice_json(self, n):
+        return {'id': n.id, 'message': n.message, 'level': n.level,
+                'instrument_id': n.instrument_id,
+                'instrument_name': n.instrument.name if n.instrument else None,
+                'created_by_name': n.created_by_name,
+                'created_at': iso(n.created_at), 'expires_at': iso(n.expires_at)}
+
+    # ------------------------- Settings and notifications --------------------
+    def _audit(self, user, action, data):
+        self.session.add(AuditEvent(actor_id=getattr(user, 'id', None),
+                                    actor_name=getattr(user, 'name', '') or '',
+                                    action=action, data=data))
+
+    def webhook_names(self):
+        """ Webhook endpoints are secrets: their URLs are only defined on the
+        server (ISSUES_WEBHOOKS in config.py or ISSUES_WEBHOOK_<NAME> env). """
+        names = set((self.app.config.get('ISSUES_WEBHOOKS') or {}).keys())
+        names.update(k[len('ISSUES_WEBHOOK_'):].lower().replace('_', '-')
+                     for k in os.environ if k.startswith('ISSUES_WEBHOOK_'))
+        return sorted(names)
+
+    def webhook_url(self, name):
+        urls = self.app.config.get('ISSUES_WEBHOOKS') or {}
+        url = urls.get(name) or os.environ.get(
+            'ISSUES_WEBHOOK_' + name.upper().replace('-', '_'))
+        if not url or not url.startswith('https://'):
+            return None
+        return url
+
+    def notification_settings(self):
+        notif = dict(DEFAULT_CONFIG['notifications'])
+        notif.update(self.config().get('notifications') or {})
+        ack = {s['id']: s['ack_minutes'] for s in self.knowledge()['severities']}
+        ack.update(notif.get('ack_minutes') or {})
+        notif['ack_minutes'] = ack
+        return notif
+
+    def save_settings(self, payload, user=None):
+        """ Validate and store the notification settings in config:issues. """
+        user = user if user is not None else self.app.user
+        require(self.roles(user), ADMIN)
+        errors = {}
+        hooks = set(self.webhook_names())
+        severities = self.severities()
+
+        def emails(key, value):
+            value = value or []
+            if isinstance(value, str):
+                value = re.split(r'[\s,;]+', value)
+            out = [e.strip() for e in value if str(e).strip()]
+            bad = [e for e in out if not EMAIL_RE.match(e)]
+            if bad:
+                errors[key] = f"Invalid email: {', '.join(bad)}"
+            return out
+
+        def webhooks(key, value):
+            out = [w for w in (value or []) if w]
+            bad = [w for w in out if w not in hooks]
+            if bad:
+                errors[key] = f"Unknown webhook: {', '.join(bad)}"
+            return out
+
+        notif = {
+            'email': emails('email', payload.get('email')),
+            'webhooks': webhooks('webhooks', payload.get('webhooks')),
+            'receipt_to_reporter': bool(payload.get('receipt_to_reporter', True)),
+            'notify_reporter': bool(payload.get('notify_reporter', True)),
+            'escalation': {
+                'email': emails('escalation_email', (payload.get('escalation') or {}).get('email')),
+                'webhooks': webhooks('escalation_webhooks',
+                                     (payload.get('escalation') or {}).get('webhooks')),
+            },
+            'routes': [],
+            'ack_minutes': {},
+        }
+        for sid, minutes in (payload.get('ack_minutes') or {}).items():
+            try:
+                if sid not in severities or not 0 < int(minutes) <= 10080:
+                    raise ValueError
+                notif['ack_minutes'][sid] = int(minutes)
+            except (TypeError, ValueError):
+                errors['ack_minutes'] = 'Minutes must be between 1 and 10080.'
+        names = {i.name for i in self.instruments(reportable_only=False, sync=False)}
+        for i, route in enumerate(payload.get('routes') or []):
+            key = f'routes.{i}'
+            insts = [n for n in (route.get('instruments') or []) if n]
+            if any(n not in names for n in insts):
+                errors[key] = 'Unknown instrument in route.'
+            if route.get('min_severity', 'question') not in severities:
+                errors[key] = 'Unknown severity in route.'
+            notif['routes'].append({
+                'instruments': insts,
+                'min_severity': route.get('min_severity', 'question'),
+                'email': emails(key, route.get('email')),
+                'webhooks': webhooks(key, route.get('webhooks')),
+            })
+        if errors:
+            raise ValidationError(errors)
+
+        dm = self.app.dm
+        config = dict(self.config() or DEFAULT_CONFIG)
+        config['notifications'] = notif
+        form = dm.get_form_by(name='config:issues')
+        if form is None:
+            dm.create_form(name='config:issues', definition=config)
+        else:
+            dm.update_form(id=form.id, definition=config)
+        if flask.has_app_context():
+            flask.g.pop('mi_config', None)
+        self._audit(user, 'settings_saved', {'notifications': notif})
+        self.session.commit()
+        return notif
+
+    def send_test(self, channel, destination, user=None):
+        user = user if user is not None else self.app.user
+        require(self.roles(user), ADMIN)
+        destination = str(destination or '').strip()
+        if channel == 'email' and not EMAIL_RE.match(destination):
+            raise ValidationError({'destination': 'Enter a valid email address.'})
+        if channel == 'webhook' and destination not in self.webhook_names():
+            raise ValidationError({'destination': 'Unknown webhook.'})
+        if channel not in ('email', 'webhook'):
+            raise ValidationError({'channel': 'Unknown channel.'})
+        msg = OutboxMessage(kind='test', channel=channel, destination=destination,
+                            dedupe_key=f'test:{uuid.uuid4().hex}')
+        self.session.add(msg)
+        self._audit(user, 'test_sent', {'channel': channel, 'destination': destination})
+        self.session.commit()
+        return msg
+
+    def outbox_summary(self, user=None):
+        require(self.roles(user), ADMIN)
+        s = self.session
+        counts = dict(s.execute(select(OutboxMessage.status, func.count())
+                                .group_by(OutboxMessage.status)).all())
+        recent = list(s.scalars(select(OutboxMessage)
+                                .where(OutboxMessage.status != 'accepted')
+                                .order_by(OutboxMessage.id.desc()).limit(50)))
+        oldest = s.scalars(select(func.min(OutboxMessage.created_at))
+                           .where(OutboxMessage.status.in_(['queued', 'retrying']))).first()
+        return {'counts': counts, 'messages': recent, 'oldest_pending': as_utc(oldest)}
+
+    def retry_message(self, message_id, user=None):
+        user = user if user is not None else self.app.user
+        require(self.roles(user), ADMIN)
+        msg = self.session.get(OutboxMessage, int(message_id))
+        if msg is None:
+            raise NotFound('Message not found')
+        if msg.status not in ('failed', 'skipped'):
+            raise ValidationError({'status': 'Only failed messages can be retried.'})
+        msg.status, msg.attempts, msg.next_attempt_at = 'queued', 0, utcnow()
+        self._audit(user, 'message_retried', {'id': msg.id})
+        self.session.commit()
+        return msg
+
+    def _notify(self, issue, event, actor=None):
+        """ Queue one outbox message per recipient in the same transaction as
+        the event. The worker delivers them, so a mail or Teams outage never
+        blocks or loses a report. """
+        notif = self.notification_settings()
+        severities = self.severities()
+        rank = severities.get(issue.severity, {}).get('rank', 0)
+        targets = []
+        kind = event.kind
+        people = [issue.reporter_email] + [a.user_email for a in issue.affected]
+        actor_email = getattr(actor, 'email', None)
+
+        if kind == 'created':
+            targets += [('email', e) for e in notif['email']]
+            targets += [('webhook', w) for w in notif['webhooks']]
+            for route in notif.get('routes') or []:
+                if route.get('instruments') and issue.instrument_name not in route['instruments']:
+                    continue
+                if rank < severities.get(route.get('min_severity'), {}).get('rank', 0):
+                    continue
+                targets += [('email', e) for e in route.get('email', [])]
+                targets += [('webhook', w) for w in route.get('webhooks', [])]
+            if notif.get('receipt_to_reporter', True) and issue.reporter_email:
+                targets.append(('receipt', issue.reporter_email))
+        elif kind == 'escalated':
+            esc = notif.get('escalation') or {}
+            targets += [('email', e) for e in esc.get('email', [])]
+            targets += [('webhook', w) for w in esc.get('webhooks', [])]
+        elif kind in ('acknowledge', 'resolve', 'reopen', 'duplicate'):
+            if notif.get('notify_reporter', True):
+                targets += [('email', e) for e in people if e]
+            if kind in ('resolve', 'reopen'):
+                targets += [('webhook', w) for w in notif['webhooks']]
+        elif kind == 'comment':
+            if event.data.get('by_staff'):
+                if notif.get('notify_reporter', True):
+                    targets += [('email', e) for e in people if e]
+            else:
+                staff_emails = []
+                if issue.assignee_id:
+                    staff_emails = [u['email'] for u in self.staff_users()
+                                    if u['id'] == issue.assignee_id]
+                targets += [('email', e) for e in (staff_emails or notif['email'])]
+
+        for channel, dest in dict.fromkeys(targets):
+            if channel == 'email' and dest == actor_email:
+                continue  # nobody needs an email about their own action
+            self.session.add(OutboxMessage(
+                issue_id=issue.id, event_id=event.id, kind=kind, channel=channel,
+                destination=dest,
+                dedupe_key=f'{issue.id}:{event.id}:{channel}:{dest}'[:128]))
+
+    def escalate_overdue(self, now=None):
+        """ Re-alert the escalation contacts about issues that nobody
+        acknowledged in time. Runs in the worker, so it keeps working after
+        the reporter closes the browser. Each issue is escalated once per
+        report or reopen. """
+        now = now or utcnow()
+        notif = self.notification_settings()
+        ack = notif['ack_minutes']
+        esc = notif.get('escalation') or {}
+        contacts = len(esc.get('email', [])) + len(esc.get('webhooks', []))
+        count = 0
+        q = select(Issue).where(Issue.status.in_(['new', 'reopened']))
+        for issue in self.session.scalars(q):
+            start, escalated = None, False
+            for e in issue.events:
+                if e.kind in ('created', 'reopen'):
+                    start, escalated = as_utc(e.at), False
+                elif e.kind == 'escalated':
+                    escalated = True
+            if start is None or escalated:
+                continue
+            deadline = start + dt.timedelta(minutes=ack.get(issue.severity, 30))
+            if now >= deadline:
+                self._add_event(issue, None, 'escalated',
+                                {'after_minutes': ack.get(issue.severity, 30),
+                                 'contacts': contacts}, at=now)
+                count += 1
+        self.session.commit()
+        return count
 
     # ------------------------- Serialization ---------------------------------
     def can_see_private(self, issue, user=None, roles=None):
@@ -397,6 +1081,7 @@ class IssuesService:
         user = user if user is not None else self.app.user
         roles = self.roles(user)
         private = self.can_see_private(issue, user, roles)
+        participant = self.is_participant(issue, user, roles)
         d = {
             'id': issue.id, 'ticket': issue.ticket,
             'instrument_id': issue.instrument_id,
@@ -409,27 +1094,57 @@ class IssuesService:
             'acknowledged_at': iso(issue.acknowledged_at),
             'resolved_at': iso(issue.resolved_at),
             'closed_at': iso(issue.closed_at),
+            'assignee_id': issue.assignee_id,
             'assignee_name': issue.assignee_name,
             'symptoms': [{'id': sy.symptom_id, 'label': sy.label}
                          for sy in issue.symptoms],
+            'affected_count': len(issue.affected),
             'version': issue.version,
             'is_mine': issue.reporter_id == user.id,
         }
         if private:
             d.update(reporter_name=issue.reporter_name)
         if detail:
+            dup = self.session.get(Issue, issue.duplicate_of_id) if issue.duplicate_of_id else None
             d.update(description=issue.description, tried=issue.tried,
-                     context=issue.context)
+                     context=issue.context, resolution=issue.resolution,
+                     duplicate_of=dup.ticket if dup else None,
+                     duplicate_of_id=dup.id if dup else None,
+                     is_participant=participant,
+                     is_affected=any(a.user_id == user.id for a in issue.affected),
+                     is_staff=STAFF in roles)
             if private:
                 d.update(reporter_email=issue.reporter_email,
-                         contact=issue.contact)
-            d['events'] = [{'at': iso(e.at), 'kind': e.kind,
-                            'actor_name': e.actor_name if private else '',
-                            'data': e.data}
+                         contact=issue.contact,
+                         affected=[a.user_name for a in issue.affected])
+            if STAFF in roles:
+                d['downtimes'] = [{'state': x.state, 'start': iso(x.start),
+                                   'end': iso(x.end)} for x in issue.downtimes]
+            d['attachments'] = [] if not participant else [
+                {'id': a.id, 'filename': a.filename, 'size': a.size,
+                 'content_type': a.content_type, 'internal': a.internal,
+                 'uploaded_by_name': a.uploaded_by_name,
+                 'uploaded_at': iso(a.uploaded_at)}
+                for a in issue.attachments if not a.internal or STAFF in roles]
+            d['events'] = [{'at': iso(e.at), 'kind': e.kind, 'internal': e.internal,
+                            'actor_name': e.actor_name
+                            if private or e.data.get('by_staff') or e.actor_id is None else '',
+                            'data': {k: v for k, v in e.data.items() if k != 'by_staff'}}
                            for e in issue.events
                            if not e.internal or STAFF in roles]
         return d
 
 
+class _AsUser:
+    """ Present an EMhub user row as an authenticated user for authz. """
+    is_authenticated = True
+
+    def __init__(self, user):
+        self._u = user
+
+    def __getattr__(self, name):
+        return getattr(self._u, name)
+
+
 __all__ = ['IssuesService', 'ValidationError', 'NotFound', 'Forbidden',
-           'instrument_type_for']
+           'Conflict', 'instrument_type_for']

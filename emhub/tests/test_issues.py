@@ -29,6 +29,8 @@ Tests run on SQLite. They also run on PostgreSQL if ISSUES_TEST_PG_URL is set
 or the 'pgserver' package (embedded PostgreSQL) is installed.
 """
 
+import datetime as dt
+import io
 import os
 import shutil
 import tempfile
@@ -94,8 +96,12 @@ class IssuesTestBase:
             conn.exec_driver_sql('DROP TABLE IF EXISTS mi_alembic_version')
         db.migrate()
 
+        cls.files = tempfile.mkdtemp(prefix='emhub-issues-files-')
         cls.app = create_app({'TESTING': True, 'SECRET_KEY': 'test',
-                              'EMHUB_ISSUES': True, 'ISSUES_DB_URL': url})
+                              'EMHUB_ISSUES': True, 'ISSUES_DB_URL': url,
+                              'ISSUES_FILES': cls.files,
+                              'ISSUES_BASE_URL': 'https://emhub.example.org',
+                              'ISSUES_WEBHOOKS': {'teams-cryoem': 'https://example.invalid/hook'}})
         cls.svc = cls.app.issues
 
         users = cls.app.dm.get_users()
@@ -108,6 +114,10 @@ class IssuesTestBase:
             insts = cls.svc.instruments()
             cls.krios = next(i for i in insts if i.name == 'Krios01')
             cls.vitrobot = next(i for i in insts if i.name == 'Vitrobot01')
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(getattr(cls, 'files', ''), ignore_errors=True)
 
     @classmethod
     def get_db_url(cls, instance):
@@ -187,8 +197,8 @@ class IssuesTestBase:
         with self.app.app_context():
             msgs = list(self.svc.session.scalars(
                 select(OutboxMessage).where(OutboxMessage.issue_id == issue['id'])))
-            self.assertEqual([(m.channel, m.destination) for m in msgs],
-                             [('receipt', self.reporter.email)])
+            self.assertIn(('receipt', self.reporter.email),
+                          [(m.channel, m.destination) for m in msgs])
 
     def test_idempotent_submit(self):
         r1 = self.report(idempotency_key='same-key-1')
@@ -236,7 +246,9 @@ class IssuesTestBase:
         titles = [i['title'] for i in r.get_json()['issues']]
         self.assertIn('Listed issue', titles)
         r = self.client_for(self.other).get('/api/mi/issues?mine=1')
-        self.assertEqual(r.get_json()['issues'], [])
+        mine = r.get_json()['issues']
+        self.assertTrue(all(i['is_mine'] for i in mine))
+        self.assertNotIn('Listed issue', [i['title'] for i in mine])
 
     def test_disable_instrument(self):
         url = '/api/mi/instruments/%d' % self.vitrobot.id
@@ -269,6 +281,288 @@ class IssuesTestBase:
         html = client.post('/get_content', data={'content_id': 'mi_issue',
                                                  'issue_id': str(issue['id'])}).get_data(as_text=True)
         self.assertIn(issue['ticket'], html)
+
+    # ------------------------- Phase 2: workflow ------------------------------
+    def act(self, user, issue, action, **extra):
+        data = {'action': action, 'version': issue['version']}
+        data.update(extra)
+        r = self.post(self.client_for(user), '/api/mi/issues/%d/transition' % issue['id'],
+                      data, user=user)
+        return r, (r.get_json() or {}).get('issue')
+
+    def test_workflow(self):
+        issue = self.report().get_json()['issue']
+
+        r, _ = self.act(self.reporter, issue, 'acknowledge')
+        self.assertEqual(r.status_code, 403)  # reporters cannot triage
+
+        r, issue2 = self.act(self.manager, issue, 'acknowledge')
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.assertEqual(issue2['status'], 'acknowledged')
+        self.assertIsNotNone(issue2['acknowledged_at'])
+        self.assertEqual(issue2['assignee_name'], self.manager.name)
+
+        r, _ = self.act(self.manager, issue, 'investigate')  # stale version
+        self.assertEqual(r.status_code, 409)
+
+        r, _ = self.act(self.manager, issue2, 'close')  # only resolved issues
+        self.assertEqual(r.status_code, 422)
+
+        r, _ = self.act(self.manager, issue2, 'resolve')
+        self.assertEqual(r.status_code, 422)
+        self.assertEqual(set(r.get_json()['errors']), {'resolution_type', 'root_cause'})
+
+        r, issue3 = self.act(self.manager, issue2, 'resolve',
+                             resolution_type='Fixed by staff on site',
+                             root_cause='Instrument hardware',
+                             resolution_notes='Re-seated the cassette.', time_lost_min=45)
+        self.assertEqual(issue3['status'], 'resolved')
+        self.assertEqual(issue3['resolution']['time_lost_min'], 45)
+
+        r, _ = self.act(self.other, issue3, 'reopen', reason='Still failing')
+        self.assertEqual(r.status_code, 403)  # not involved in this issue
+        r, _ = self.act(self.reporter, issue3, 'reopen')
+        self.assertEqual(r.status_code, 422)  # reason required
+        r, issue4 = self.act(self.reporter, issue3, 'reopen', reason='Fails again after reload')
+        self.assertEqual(issue4['status'], 'reopened')
+        self.assertIsNone(issue4['resolved_at'])
+        kinds = [e['kind'] for e in issue4['events']]
+        self.assertEqual(kinds, ['created', 'acknowledge', 'resolve', 'reopen'])
+
+    def test_update_and_downtime(self):
+        issue = self.report().get_json()['issue']
+        url = '/api/mi/issues/%d/update' % issue['id']
+        client = self.client_for(self.manager)
+
+        r = self.post(client, url, {'version': issue['version'], 'assignee_id': self.other.id},
+                      user=self.manager)
+        self.assertEqual(r.status_code, 422)  # not a staff member
+
+        r = self.post(client, url, {'version': issue['version'], 'severity': 'blocked',
+                                    'instrument_state': 'unavailable',
+                                    'state_since': '2020-01-01T08:00'}, user=self.manager)
+        self.assertEqual(r.status_code, 200, r.get_json())
+        issue = r.get_json()['issue']
+        self.assertEqual(issue['severity'], 'blocked')
+        self.assertEqual(len(issue['downtimes']), 1)
+        self.assertIsNone(issue['downtimes'][0]['end'])
+
+        r, issue = self.act(self.manager, issue, 'resolve', resolution_type='Workaround in place',
+                            root_cause='Unknown')
+        self.assertEqual(issue['instrument_state'], 'operational')
+        self.assertIsNotNone(issue['downtimes'][0]['end'])
+        # Reporters do not see downtime bookkeeping
+        mine = self.client_for(self.reporter).get('/api/mi/issues/%d' % issue['id']).get_json()['issue']
+        self.assertNotIn('downtimes', mine)
+
+    def test_comments_and_join(self):
+        issue = self.report().get_json()['issue']
+        url = '/api/mi/issues/%d/comments' % issue['id']
+
+        r = self.post(self.client_for(self.reporter), url, {'text': 'Still drifting'}, user=self.reporter)
+        self.assertEqual(r.status_code, 201)
+        r = self.post(self.client_for(self.other), url, {'text': 'Me too'}, user=self.other)
+        self.assertEqual(r.status_code, 403)
+        r = self.post(self.client_for(self.reporter), url, {'text': 'x', 'internal': True}, user=self.reporter)
+        self.assertEqual(r.status_code, 403)
+
+        r = self.post(self.client_for(self.other), '/api/mi/issues/%d/join' % issue['id'], {}, user=self.other)
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.get_json()['issue']['is_affected'])
+        r = self.post(self.client_for(self.other), url, {'text': 'Me too'}, user=self.other)
+        self.assertEqual(r.status_code, 201)
+
+        r = self.post(self.client_for(self.manager), url, {'text': 'Check the vendor log', 'internal': True},
+                      user=self.manager)
+        staff_view = r.get_json()['issue']
+        self.assertIn('Check the vendor log', [e['data'].get('text') for e in staff_view['events']])
+        mine = self.client_for(self.reporter).get('/api/mi/issues/%d' % issue['id']).get_json()['issue']
+        self.assertNotIn('Check the vendor log', [e['data'].get('text') for e in mine['events']])
+        self.assertEqual(mine['affected'], [self.other.name])
+
+    def test_duplicate(self):
+        original = self.report(title='Original').get_json()['issue']
+        dup = self.report(user=self.other, title='Same problem').get_json()['issue']
+        r, dup2 = self.act(self.manager, dup, 'duplicate', duplicate_of=original['ticket'])
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.assertEqual(dup2['status'], 'duplicate')
+        self.assertEqual(dup2['duplicate_of'], original['ticket'])
+        orig = self.client_for(self.manager).get('/api/mi/issues/%d' % original['id']).get_json()['issue']
+        self.assertIn(self.other.name, orig['affected'])
+        r, _ = self.act(self.manager, original, 'duplicate', duplicate_of=original['ticket'])
+        self.assertEqual(r.status_code, 422)  # not a duplicate of itself
+
+    def test_attachments(self):
+        issue = self.report().get_json()['issue']
+        url = '/api/mi/issues/%d/attachments' % issue['id']
+        png = b'\x89PNG\r\n\x1a\n' + b'0' * 100
+
+        def upload(user, data, name, internal=False):
+            return self.client_for(user).post(
+                url, data={'file': (io.BytesIO(data), name), 'internal': '1' if internal else '0'},
+                headers={'X-MI-CSRF': 'token-%d' % user.id}, content_type='multipart/form-data')
+
+        self.assertEqual(upload(self.reporter, png, '../../shot.png').status_code, 201)
+        self.assertEqual(upload(self.reporter, b'not an image', 'fake.png').status_code, 422)
+        self.assertEqual(upload(self.reporter, b'MZ\x90\x00', 'tool.exe').status_code, 422)
+        self.assertEqual(upload(self.other, png, 'x.png').status_code, 403)
+        r = upload(self.manager, b'vendor log line\n', 'vendor.log', internal=True)
+        self.assertEqual(r.status_code, 201)
+
+        staff_files = r.get_json()['issue']['attachments']
+        self.assertEqual([a['filename'] for a in staff_files], ['shot.png', 'vendor.log'])
+        mine = self.client_for(self.reporter).get('/api/mi/issues/%d' % issue['id']).get_json()['issue']
+        self.assertEqual([a['filename'] for a in mine['attachments']], ['shot.png'])
+
+        shot, log = staff_files
+        r = self.client_for(self.reporter).get('/api/mi/attachments/%d' % shot['id'])
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data, png)
+        self.assertEqual(r.headers['X-Content-Type-Options'], 'nosniff')
+        self.assertEqual(self.client_for(self.other).get('/api/mi/attachments/%d' % shot['id']).status_code, 403)
+        self.assertEqual(self.client_for(self.reporter).get('/api/mi/attachments/%d' % log['id']).status_code, 404)
+
+    def test_notices(self):
+        data = {'instrument_id': self.krios.id, 'message': 'Krios01 cryo-cycle until Friday'}
+        r = self.post(self.client_for(self.reporter), '/api/mi/notices', data, user=self.reporter)
+        self.assertEqual(r.status_code, 403)
+        r = self.post(self.client_for(self.manager), '/api/mi/notices', data, user=self.manager)
+        self.assertEqual(r.status_code, 201)
+        notice = r.get_json()['notice']
+        msgs = lambda iid: [n['message'] for n in self.client_for(self.reporter).get(
+            '/api/mi/notices?instrument_id=%d' % iid).get_json()['notices']]
+        self.assertIn(data['message'], msgs(self.krios.id))
+        self.assertNotIn(data['message'], msgs(self.vitrobot.id))
+        self.post(self.client_for(self.manager), '/api/mi/notices/%d/remove' % notice['id'], {}, user=self.manager)
+        self.assertNotIn(data['message'], msgs(self.krios.id))
+
+    def test_duplicates_lookup(self):
+        issue = self.report(problem_area='detector', symptoms=[], title='Detector not ready').get_json()['issue']
+        r = self.client_for(self.other).get('/api/mi/duplicates?instrument_id=%d&problem_area=detector'
+                                            % self.krios.id)
+        found = r.get_json()['issues']
+        self.assertEqual(found[0]['problem_area'], 'detector')
+        self.assertIn(issue['id'], [i['id'] for i in found])
+
+    # ------------------------- Phase 2: notifications -------------------------
+    def with_settings(self, settings):
+        client = self.client_for(self.admin)
+        r = self.post(client, '/api/mi/settings', settings, user=self.admin)
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.addCleanup(self.post, client, '/api/mi/settings', {}, self.admin)
+
+    def outbox(self, issue_id=None):
+        from emhub.issues.models import OutboxMessage
+        from sqlalchemy import select
+        with self.app.app_context():
+            q = select(OutboxMessage).order_by(OutboxMessage.id)
+            if issue_id:
+                q = q.where(OutboxMessage.issue_id == issue_id)
+            return list(self.svc.session.scalars(q))
+
+    def test_settings_validation(self):
+        bad = {'email': ['not-an-email'], 'webhooks': ['unknown-hook'],
+               'routes': [{'instruments': ['NoSuchScope'], 'min_severity': 'stop'}]}
+        r = self.post(self.client_for(self.admin), '/api/mi/settings', bad, user=self.admin)
+        self.assertEqual(r.status_code, 422)
+        self.assertEqual(set(r.get_json()['errors']), {'email', 'webhooks', 'routes.0'})
+        r = self.post(self.client_for(self.manager), '/api/mi/settings', {}, user=self.manager)
+        self.assertEqual(r.status_code, 403)  # admins only
+
+    def test_routing_and_worker(self):
+        from emhub.issues.worker import NotificationWorker, RetryLater, PermanentError
+        self.with_settings({'email': ['facility@example.org'], 'webhooks': ['teams-cryoem'],
+                            'routes': [{'instruments': ['Krios01'], 'min_severity': 'blocked',
+                                        'email': ['krios-team@example.org']}]})
+        quiet = self.report(severity='question', title='Routing quiet').get_json()['issue']
+        urgent = self.report(severity='stop', title='Routing urgent').get_json()['issue']
+        dests = lambda i: sorted(m.destination for m in self.outbox(i['id']))
+        self.assertEqual(dests(quiet), sorted(['facility@example.org', 'teams-cryoem', self.reporter.email]))
+        self.assertIn('krios-team@example.org', dests(urgent))
+
+        sent, posted = [], []
+        worker = NotificationWorker(self.app, send_email=lambda *a: sent.append(a),
+                                    post_webhook=lambda *a: posted.append(a))
+        while worker.run_once():
+            pass
+        self.assertTrue(all(m.status == 'accepted' for m in self.outbox(urgent['id'])))
+        subjects = [s for to, s, body in sent if to == 'krios-team@example.org']
+        self.assertTrue(subjects[0].startswith('[%s] New issue - Stop now - Krios01' % urgent['ticket']))
+        body = [b for to, s, b in sent if to == 'krios-team@example.org'][0]
+        self.assertIn('https://emhub.example.org/main?content_id=mi_issue&issue_id=%d' % urgent['id'], body)
+        url, card = posted[-1]
+        self.assertEqual(url, 'https://example.invalid/hook')
+        self.assertEqual(card['attachments'][0]['contentType'], 'application/vnd.microsoft.card.adaptive')
+
+        # Failures: transient errors are retried later, permanent ones fail
+        failing = self.report(title='Delivery failure').get_json()['issue']
+
+        def flaky_email(to, subject, body):
+            raise RetryLater('SMTP down')
+
+        def broken_hook(url, payload):
+            raise PermanentError('HTTP 404')
+
+        worker = NotificationWorker(self.app, send_email=flaky_email, post_webhook=broken_hook)
+        worker.run_once()
+        status = {m.channel: m for m in self.outbox(failing['id'])}
+        self.assertEqual(status['email'].status, 'retrying')
+        self.assertGreater(status['email'].next_attempt_at.replace(tzinfo=dt.timezone.utc)
+                           if status['email'].next_attempt_at.tzinfo is None
+                           else status['email'].next_attempt_at,
+                           dt.datetime.now(dt.timezone.utc))
+        self.assertEqual(status['webhook'].status, 'failed')
+        # The report itself is untouched by delivery failures
+        self.assertEqual(self.client_for(self.reporter).get('/api/mi/issues/%d' % failing['id']).status_code, 200)
+
+        r = self.post(self.client_for(self.admin), '/api/mi/outbox/%d/retry' % status['webhook'].id, {},
+                      user=self.admin)
+        self.assertEqual(r.get_json()['status'], 'queued')
+
+    def test_progress_emails(self):
+        issue = self.report().get_json()['issue']
+        r, issue = self.act(self.manager, issue, 'acknowledge')
+        msgs = [(m.kind, m.destination) for m in self.outbox(issue['id'])]
+        self.assertIn(('acknowledge', self.reporter.email), msgs)
+        # No email to the person who did the action
+        self.assertNotIn(('acknowledge', self.manager.email), msgs)
+
+    def test_escalation(self):
+        self.with_settings({'escalation': {'email': ['oncall@example.org']},
+                            'ack_minutes': {'stop': 2}})
+        issue = self.report(severity='stop', title='Escalate me').get_json()['issue']
+        with self.app.app_context():
+            soon = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=1)
+            self.svc.escalate_overdue(now=soon)
+            later = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=3)
+            self.assertGreaterEqual(self.svc.escalate_overdue(now=later), 1)
+            self.svc.escalate_overdue(now=later)  # only once
+        msgs = [(m.kind, m.destination) for m in self.outbox(issue['id'])]
+        self.assertEqual(msgs.count(('escalated', 'oncall@example.org')), 1)
+
+        acked = self.report(severity='stop', title='Acknowledged in time').get_json()['issue']
+        self.act(self.manager, acked, 'acknowledge')
+        with self.app.app_context():
+            self.svc.escalate_overdue(now=later)
+        self.assertNotIn('escalated', [m.kind for m in self.outbox(acked['id'])])
+
+    def test_settings_page(self):
+        r = self.client_for(self.admin).post('/get_content', data={'content_id': 'mi_settings'})
+        html = r.get_data(as_text=True)
+        self.assertNotIn('error-modal-title', html)
+        self.assertIn('teams-cryoem', html)
+        r = self.client_for(self.reporter).post('/get_content', data={'content_id': 'mi_settings'})
+        self.assertIn('error-modal-title', r.get_data(as_text=True))
+
+    def test_issue_page_as_staff(self):
+        issue = self.report().get_json()['issue']
+        html = self.client_for(self.manager).post('/get_content', data={
+            'content_id': 'mi_issue', 'issue_id': str(issue['id'])}).get_data(as_text=True)
+        self.assertNotIn('error-modal-title', html)
+        self.assertIn('Staff actions', html)
+        html = self.client_for(self.reporter).post('/get_content', data={
+            'content_id': 'mi_issue', 'issue_id': str(issue['id'])}).get_data(as_text=True)
+        self.assertNotIn('Staff actions', html)
 
 
 class TestIssuesSqlite(IssuesTestBase, unittest.TestCase):
