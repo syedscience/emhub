@@ -7,14 +7,8 @@
         <p class="fac">{{ facility_name }}</p>
         <h1>Report a session issue</h1>
         <p class="sub">Tell staff what is happening. Safe checks for your problem appear on the right while you wait for a reply.</p>
-        {% if is_manager %}
-            <nav class="tabs" aria-label="Views">
-                <a class="on" href="{{ url_for_content('mi_report') }}">Report an issue</a>
-                <a href="{{ url_for_content('mi_issues') }}">Issue log</a>
-                <a href="{{ url_for_content('mi_insights') }}">Insights</a>
-                {% if is_admin %}<a href="{{ url_for_content('mi_settings') }}">Settings</a>{% endif %}
-            </nav>
-        {% endif %}
+        {% set active = 'mi_report' %}
+        {% include 'mi_tabs.html' %}
     </header>
 
     <div id="mi-notices"></div>
@@ -181,6 +175,11 @@
         return meta.instruments.find(function (i) { return String(i.id) === id; });
     }
     function selectedArea() { return areasById[$('#mi-area').val()]; }
+    // The area's symptoms that apply to the selected instrument
+    function areaSymptoms(area) {
+        var inst = selectedInstrument(), ids = inst && inst.symptoms ? inst.symptoms[area.id] : null;
+        return (area.symptoms || []).filter(function (s) { return !ids || ids.indexOf(s.id) >= 0; });
+    }
     function selectedSymptoms() {
         return $('#mi-symptoms input:checked').map(function () { return $(this).val(); }).get();
     }
@@ -243,10 +242,10 @@
         var area = selectedArea(), box = $('#mi-symptoms').empty();
         if (!area) {
             box.append('<p class="empty-note">Choose a problem area first.</p>');
-        } else if (!(area.symptoms || []).length) {
+        } else if (!areaSymptoms(area).length) {
             box.append('<p class="empty-note">No presets for this area. Describe it below.</p>');
         } else {
-            area.symptoms.forEach(function (s) {
+            areaSymptoms(area).forEach(function (s) {
                 box.append($('<label class="chip">').append(
                     $('<input type="checkbox">').val(s.id), $('<span>').text(s.label)));
             });

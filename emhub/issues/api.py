@@ -93,7 +93,7 @@ def _invalid(e):
 @issues_bp.errorhandler(Conflict)
 def _conflict(e):
     _service().store.rollback()
-    return _error('This issue was changed by someone else. '
+    return _error(str(e) or 'This issue was changed by someone else. '
                   'Reload it and try again.', 409)
 
 
@@ -114,7 +114,10 @@ def meta():
     instruments = []
     for inst in svc.instruments():
         d = inst.json()
-        d['problem_areas'] = [a['id'] for a in svc.problem_areas(inst)]
+        areas = svc.problem_areas(inst)
+        d['problem_areas'] = [a['id'] for a in areas]
+        # Symptoms can be limited to some instruments too
+        d['symptoms'] = {a['id']: [sy['id'] for sy in a.get('symptoms', [])] for a in areas}
         instruments.append(d)
     return flask.jsonify({
         'instruments': instruments,
@@ -251,6 +254,26 @@ def create_notice():
 def remove_notice(notice_id):
     svc = _service()
     return flask.jsonify({'notice': svc.notice_json(svc.deactivate_notice(notice_id))})
+
+
+@issues_bp.route('/catalog', methods=['GET'])
+def catalog():
+    """ The problem areas, for the editor (managers). """
+    return flask.jsonify(_service().catalog_json())
+
+
+@issues_bp.route('/catalog/areas', methods=['POST'])
+def save_area():
+    svc = _service()
+    area = svc.save_area(_json_body())
+    return flask.jsonify({'area': area, 'catalog': svc.catalog_json()})
+
+
+@issues_bp.route('/catalog/areas/<area_id>/<action>', methods=['POST'])
+def change_area(area_id, action):
+    svc = _service()
+    svc.change_area(area_id, action, _json_body())
+    return flask.jsonify({'catalog': svc.catalog_json()})
 
 
 @issues_bp.route('/settings', methods=['GET'])

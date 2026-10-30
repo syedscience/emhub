@@ -152,6 +152,15 @@ def instrument_type_for(tags, name=''):
     return 'other'
 
 
+def _slug(label, taken, default):
+    """ A new id for an area or symptom, from its name. """
+    base = re.sub(r'[^a-z0-9]+', '_', label.lower()).strip('_')[:24] or default
+    slug, n = base, 2
+    while slug in taken:
+        slug, n = f'{base}_{n}', n + 1
+    return slug
+
+
 def iso(value):
     value = as_utc(value)
     return value.isoformat() if value else None
@@ -192,26 +201,208 @@ class IssuesService:
         return user_issue_roles(user)
 
     def knowledge(self):
+        """ The built-in knowledge file, with the problem areas as changed by
+        the facility in the problem-area editor (hidden ones left out). """
+        kb = dict(self.builtin_knowledge())
+        kb['problem_areas'] = self.problem_areas()
+        return kb
+
+    def builtin_knowledge(self):
         if self._knowledge is None:
             with open(KNOWLEDGE_FILE) as f:
                 self._knowledge = json.load(f)
-        kb = dict(self._knowledge)
-        # Facilities can override the problem areas in config:issues
-        if areas := self.config().get('problem_areas'):
-            kb['problem_areas'] = areas
-        return kb
+        return self._knowledge
 
     def severities(self):
-        return {s['id']: s for s in self.knowledge()['severities']}
+        return {s['id']: s for s in self.builtin_knowledge()['severities']}
 
-    def problem_areas(self, instrument=None):
-        areas = self.knowledge()['problem_areas']
+    def _catalog(self):
+        """ The facility's problem-area changes, read once per request. """
+        if flask.has_app_context() and 'mi_catalog' in flask.g:
+            return flask.g.mi_catalog
+        catalog = self.store.catalog()
+        if flask.has_app_context():
+            flask.g.mi_catalog = catalog
+        return catalog
+
+    def _all_areas(self):
+        """ [(area, builtin, changed)] in display order, hidden ones included.
+        The catalog keeps changed and new areas, hidden ids and the order. """
+        catalog = self._catalog()
+        changes = catalog.get('areas') or {}
+        builtin = self.builtin_knowledge()['problem_areas']
+        builtin_ids = {a['id'] for a in builtin}
+        items = {a['id']: (changes.get(a['id'], a), True, a['id'] in changes) for a in builtin}
+        items.update({aid: (a, False, True) for aid, a in changes.items()
+                      if aid not in builtin_ids})
+        order = [aid for aid in catalog.get('order') or [] if aid in items]
+        order += [aid for aid in items if aid not in order]
+        return [items[aid] for aid in order]
+
+    def problem_areas(self, instrument=None, include_hidden=False):
+        """ Problem areas offered for an instrument (all when None). Areas and
+        symptoms can be limited to instrument types and to instruments.
+        include_hidden also returns hidden areas, to name them on old issues. """
+        hidden = set(self._catalog().get('hidden') or [])
+        areas = [a for a, _, _ in self._all_areas() if include_hidden or a['id'] not in hidden]
         if instrument is None:
             return areas
+        return [dict(a, symptoms=[sy for sy in a.get('symptoms', [])
+                                  if self._applies(sy, instrument)])
+                for a in areas if self._applies(a, instrument)]
+
+    @staticmethod
+    def _applies(item, instrument):
         itype = instrument.instrument_type
-        return [a for a in areas
-                if itype not in a.get('not_types', [])
-                and (not a.get('only_types') or itype in a['only_types'])]
+        return (itype not in item.get('not_types', [])
+                and (not item.get('only_types') or itype in item['only_types'])
+                and (not item.get('only_instruments')
+                     or instrument.id in item['only_instruments']))
+
+    # ------------------------- Problem-area editor ---------------------------
+    def catalog_json(self, user=None):
+        """ Everything the problem-area editor needs (managers). """
+        require(self.roles(user), MANAGER)
+        hidden = set(self._catalog().get('hidden') or [])
+        builtin = {a['id']: a for a in self.builtin_knowledge()['problem_areas']}
+        return {
+            'version': self._catalog().get('version', 0),
+            'areas': [dict(area, builtin=is_builtin, changed=changed and is_builtin,
+                           hidden=area['id'] in hidden, original=builtin.get(area['id']))
+                      for area, is_builtin, changed in self._all_areas()],
+            'instrument_types': self.builtin_knowledge()['instrument_types'],
+            'instruments': [i.json() for i in self.instruments(reportable_only=False)],
+            'severities': self.builtin_knowledge()['severities'],
+        }
+
+    def save_area(self, payload, user=None):
+        """ Add a problem area (no id) or save the facility's version of one. """
+        user = user if user is not None else self.app.user
+        require(self.roles(user), MANAGER)
+        data = payload.get('area') if isinstance(payload.get('area'), dict) else {}
+        all_ids = {a['id'] for a, _, _ in self._all_areas()}
+        area_id = data.get('id') or None
+        if area_id is not None and area_id not in all_ids:
+            raise NotFound(f'Problem area {area_id} not found')
+        area = self._clean_area(data, area_id, all_ids)
+        catalog = self._catalog()
+        changes = dict(catalog.get('areas') or {})
+        changes[area['id']] = area
+        order = [a['id'] for a, _, _ in self._all_areas()]
+        if area['id'] not in order:
+            order.append(area['id'])
+        self._save_catalog(dict(catalog, areas=changes, order=order), payload, user,
+                           'problem_area_added' if area_id is None else 'problem_area_saved',
+                           {'area': area['id'], 'label': area['label']})
+        return area
+
+    def change_area(self, area_id, action, payload, user=None):
+        """ hide, show, up, down, or reset (a built-in area to its original). """
+        user = user if user is not None else self.app.user
+        require(self.roles(user), MANAGER)
+        items = self._all_areas()
+        order = [a['id'] for a, _, _ in items]
+        if area_id not in order:
+            raise NotFound(f'Problem area {area_id} not found')
+        catalog = dict(self._catalog())
+        hidden = set(catalog.get('hidden') or [])
+        if action == 'hide':
+            hidden.add(area_id)
+        elif action == 'show':
+            hidden.discard(area_id)
+        elif action in ('up', 'down'):
+            i = order.index(area_id)
+            j = i - 1 if action == 'up' else i + 1
+            if 0 <= j < len(order):
+                order[i], order[j] = order[j], order[i]
+        elif action == 'reset':
+            if not dict((a['id'], b) for a, b, _ in items)[area_id]:
+                raise ValidationError({'area': 'Only built-in problem areas can be reset.'})
+            catalog['areas'] = {k: v for k, v in (catalog.get('areas') or {}).items()
+                                if k != area_id}
+        else:
+            raise ValidationError({'action': f"Unknown action '{action}'."})
+        catalog.update(hidden=sorted(hidden), order=order)
+        self._save_catalog(catalog, payload, user, f'problem_area_{action}', {'area': area_id})
+
+    def _save_catalog(self, catalog, payload, user, action, audit):
+        try:
+            version = int(payload.get('version'))
+        except (TypeError, ValueError):
+            raise ValidationError({'version': 'Missing version, reload the page.'})
+        self.store.save_catalog(catalog, version, user)
+        self._audit(user, action, audit)
+        self.store.commit()
+        if flask.has_app_context():
+            flask.g.pop('mi_catalog', None)
+
+    def _clean_area(self, data, area_id, all_ids):
+        """ Check and normalise a problem area from the editor. """
+        errors = {}
+        severities = self.severities()
+        types = self.builtin_knowledge()['instrument_types']
+        instrument_ids = {i.id for i in self.instruments(reportable_only=False)}
+
+        def text(d, key, limit, required=False, where=''):
+            value = str(d.get(key) or '').strip()
+            if required and not value:
+                errors[where + key] = 'Required.'
+            return value[:limit]
+
+        def lines(d, key):
+            value = d.get(key) or []
+            if isinstance(value, str):
+                value = value.splitlines()
+            items = [str(x).strip()[:500] for x in value if str(x).strip()]
+            return items[:40]
+
+        def limits(d, where=''):
+            out = {}
+            only_types = [t for t in d.get('only_types') or [] if t in types]
+            if only_types and len(only_types) < len(types):
+                out['only_types'] = only_types
+            try:
+                only = sorted({int(x) for x in d.get('only_instruments') or []})
+            except (TypeError, ValueError):
+                only = []
+            if [x for x in only if x not in instrument_ids]:
+                errors[where + 'only_instruments'] = 'Unknown instrument.'
+            if only:
+                out['only_instruments'] = only
+            if (m := d.get('minSeverity')) not in (None, ''):
+                if m not in severities:
+                    errors[where + 'minSeverity'] = 'Unknown urgency.'
+                out['minSeverity'] = m
+            return out
+
+        label = text(data, 'label', 120, required=True)
+        if area_id is None:
+            area_id = _slug(label, all_ids, 'area')
+        area = {'id': area_id, 'label': label, **limits(data)}
+        if data.get('staffOnly'):
+            area['staffOnly'] = True
+        for key in ('hold', 'record', 'general', 'avoid'):
+            if items := lines(data, key):
+                area[key] = items
+
+        symptoms, sym_ids = [], set()
+        for n, sy in enumerate((data.get('symptoms') or [])[:40]):
+            if not isinstance(sy, dict):
+                continue
+            where = f'symptoms.{n}.'
+            sy_label = text(sy, 'label', 200, required=True, where=where)
+            sid = str(sy.get('id') or '')
+            if not re.fullmatch(r'[a-z0-9_]{1,32}', sid) or sid in sym_ids:
+                sid = _slug(sy_label, sym_ids, 'symptom')
+            sym_ids.add(sid)
+            symptom = {'id': sid, 'label': sy_label, **limits(sy, where)}
+            if steps := lines(sy, 'steps'):
+                symptom['steps'] = steps
+            symptoms.append(symptom)
+        area['symptoms'] = symptoms
+        if errors:
+            raise ValidationError(errors)
+        return area
 
     # ------------------------- Instruments -----------------------------------
     def _instrument(self, resource):
@@ -801,7 +992,7 @@ class IssuesService:
     def notification_settings(self):
         notif = dict(DEFAULT_CONFIG['notifications'])
         notif.update(self.config().get('notifications') or {})
-        ack = {s['id']: s['ack_minutes'] for s in self.knowledge()['severities']}
+        ack = {s['id']: s['ack_minutes'] for s in self.builtin_knowledge()['severities']}
         ack.update(notif.get('ack_minutes') or {})
         notif['ack_minutes'] = ack
         return notif
@@ -1066,7 +1257,7 @@ class IssuesService:
             booked_hours=booked,
             recurrence_days=int(self.config().get('recurrence_days', 30)),
             severities=list(self.severities()),
-            areas={a['id']: a['label'] for a in self.problem_areas()})
+            areas={a['id']: a['label'] for a in self.problem_areas(include_hidden=True)})
 
     EXPORT_COLUMNS = ['ticket', 'reported_at', 'occurred_at', 'acknowledged_at',
                       'resolved_at', 'closed_at', 'instrument', 'problem_area',
@@ -1079,7 +1270,7 @@ class IssuesService:
     def export_rows(self, start, end, instrument_id=None, include_imported=True, user=None):
         """ Rows for the CSV export (managers only). """
         require(self.roles(user), MANAGER)
-        areas = {a['id']: a['label'] for a in self.problem_areas()}
+        areas = {a['id']: a['label'] for a in self.problem_areas(include_hidden=True)}
         tickets = {i.id: i.ticket for i in self.store.issues()}
         tz = self.app.dm.timezone
         now = utcnow()

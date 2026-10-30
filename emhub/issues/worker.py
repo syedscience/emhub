@@ -91,7 +91,7 @@ class NotificationWorker:
         return self.svc.severities().get(issue.severity, {}).get('label', issue.severity)
 
     def _area_label(self, issue):
-        areas = {a['id']: a['label'] for a in self.svc.problem_areas()}
+        areas = {a['id']: a['label'] for a in self.svc.problem_areas(include_hidden=True)}
         return areas.get(issue.problem_area, issue.problem_area)
 
     def build_summary(self, msg):

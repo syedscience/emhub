@@ -318,6 +318,89 @@ class TestIssues(unittest.TestCase):
         second = self.new_issue()
         self.assertEqual(second['ticket'], 'MI-%s-%04d' % (year, int(n) + 1))
 
+    def test_problem_area_editor(self):
+        """ Managers add and change problem areas, also per instrument. """
+        r = self.client_for(self.reporter).get('/api/mi/catalog')
+        self.assertEqual(r.status_code, 403)
+        r = self.post(self.client_for(self.reporter), '/api/mi/catalog/areas',
+                      {'version': 0, 'area': {'label': 'x'}}, user=self.reporter)
+        self.assertEqual(r.status_code, 403)
+
+        mc = self.client_for(self.manager)
+        cat = mc.get('/api/mi/catalog').get_json()
+        stage = next(a for a in cat['areas'] if a['id'] == 'stage')
+        self.assertTrue(stage['builtin'])
+        self.assertFalse(stage['changed'])
+
+        # A new area, only for Krios01, with a symptom
+        area = {'label': 'Cryo-shield heater', 'only_types': ['tem'],
+                'only_instruments': [self.krios.id], 'general': 'Check the heater LED\nNote the time',
+                'symptoms': [{'label': 'Heater error on the panel', 'minSeverity': 'blocked',
+                              'steps': ['Take a photo of the panel']}]}
+        r = self.post(mc, '/api/mi/catalog/areas', {'version': cat['version'], 'area': area},
+                      user=self.manager)
+        self.assertEqual(r.status_code, 200, r.get_json())
+        new = r.get_json()['area']
+        self.assertEqual(new['id'], 'cryo_shield_heater')
+        self.assertEqual(new['general'], ['Check the heater LED', 'Note the time'])
+        version = r.get_json()['catalog']['version']
+
+        # A stale version is refused
+        r = self.post(mc, '/api/mi/catalog/areas', {'version': cat['version'], 'area': area},
+                      user=self.manager)
+        self.assertEqual(r.status_code, 409)
+
+        # A symptom only for Krios01 added to a built-in area
+        stage = dict(stage, symptoms=stage['symptoms'] + [
+            {'label': 'Stage shakes', 'only_instruments': [self.krios.id]}])
+        r = self.post(mc, '/api/mi/catalog/areas', {'version': version, 'area': stage},
+                      user=self.manager)
+        self.assertEqual(r.status_code, 200, r.get_json())
+        version = r.get_json()['catalog']['version']
+
+        meta = self.client_for(self.reporter).get('/api/mi/meta').get_json()
+        insts = {i['id']: i for i in meta['instruments']}
+        self.assertIn('cryo_shield_heater', insts[self.krios.id]['problem_areas'])
+        self.assertNotIn('cryo_shield_heater', insts[self.vitrobot.id]['problem_areas'])
+        self.assertIn('stage_shakes', insts[self.krios.id]['symptoms']['stage'])
+
+        issue = self.new_issue(problem_area='cryo_shield_heater',
+                               symptoms=[new['symptoms'][0]['id']], severity='question')
+        self.assertEqual(issue['severity'], 'blocked')
+        r = self.report(instrument_id=self.vitrobot.id, problem_area='cryo_shield_heater',
+                        symptoms=[])
+        self.assertEqual(r.status_code, 422)
+
+        # Hidden areas are not offered, but old issues keep their name
+        r = self.post(mc, '/api/mi/catalog/areas/cryo_shield_heater/hide', {'version': version},
+                      user=self.manager)
+        self.assertEqual(r.status_code, 200)
+        version = r.get_json()['catalog']['version']
+        meta = self.client_for(self.reporter).get('/api/mi/meta').get_json()
+        self.assertNotIn('cryo_shield_heater', meta['instruments'][0]['problem_areas'])
+        status, html = self.content(self.manager, content_id='mi_issue', issue_id=str(issue['id']))
+        self.assertIn('Cryo-shield heater', html)
+
+        # Moving and resetting a built-in area
+        r = self.post(mc, '/api/mi/catalog/areas/stage/up', {'version': version}, user=self.manager)
+        cat = r.get_json()['catalog']
+        ids = [a['id'] for a in cat['areas']]
+        self.assertLess(ids.index('stage'), ids.index('beam'))
+        r = self.post(mc, '/api/mi/catalog/areas/stage/reset', {'version': cat['version']},
+                      user=self.manager)
+        stage = next(a for a in r.get_json()['catalog']['areas'] if a['id'] == 'stage')
+        self.assertFalse(stage['changed'])
+        r = self.post(mc, '/api/mi/catalog/areas/cryo_shield_heater/reset',
+                      {'version': r.get_json()['catalog']['version']}, user=self.manager)
+        self.assertEqual(r.status_code, 422)  # only built-in areas can be reset
+
+        status, html = self.content(self.manager, content_id='mi_catalog')
+        self.assertNotIn('error-modal-title', html)
+        status, html = self.content(self.reporter, content_id='mi_catalog')
+        self.assertIn('error-modal-title', html)
+        with self.app.app_context():
+            self.assertTrue(any(e.action == 'problem_area_hide' for e in self.svc.store.audit_events()))
+
     def test_pages(self):
         issue = self.new_issue()
         main = self.client_for(self.reporter).get('/main?content_id=mi_report').get_data(as_text=True)

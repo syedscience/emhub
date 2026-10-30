@@ -1,0 +1,426 @@
+{% include "mi_common.html" %}
+{% include "mi_style.html" %}
+
+<div class="mi">
+<div class="wrap">
+    <header class="top">
+        <p class="fac">{{ facility_name }}</p>
+        <h1>Problem areas</h1>
+        <p class="sub">What users can pick on the report form, what they see, and what to do while they
+            wait for staff. Changes apply to new reports straight away.</p>
+        {% set active = 'mi_catalog' %}
+        {% include 'mi_tabs.html' %}
+    </header>
+
+    <p class="meta" id="mi-loading">Loading...</p>
+
+    <div class="kbwrap" id="mi-kb" style="display: none">
+        <section class="card-mi">
+            <div class="kbhead">
+                <h3>Problem areas</h3>
+                <button type="button" class="btn-mi small primary" id="mi-new">Add problem area</button>
+            </div>
+            <ul class="kblist" id="mi-list"></ul>
+        </section>
+
+        <div>
+            <section class="card-mi" id="mi-editor-empty">
+                <p class="panel-empty mb-0">Choose a problem area to edit it, or add a new one.</p>
+            </section>
+
+            <form class="card-mi" id="mi-editor" novalidate style="display: none; padding: 16px 20px">
+                <h2 id="mi-ed-title" style="margin-bottom: 14px">Edit problem area</h2>
+                <div class="row">
+                    <div>
+                        <label class="f" for="ed-label">Name users will see <span class="req">*</span></label>
+                        <input type="text" id="ed-label" maxlength="120">
+                        <div class="ferr" data-for="label"></div>
+                    </div>
+                    <div>
+                        <label class="f" for="ed-type">Who acts</label>
+                        <select id="ed-type">
+                            <option value="normal">Users can try checks</option>
+                            <option value="staff">Staff only: users get holding actions</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="f" for="ed-min">Raise urgency to at least
+                            <span class="hint">Reports in this area are sent with at least this urgency.</span></label>
+                        <select id="ed-min"></select>
+                        <div class="ferr" data-for="minSeverity"></div>
+                    </div>
+                </div>
+
+                <div class="row one">
+                    <div>
+                        <span class="f">Instrument types <span class="hint">Offered for these types of instrument.</span></span>
+                        <div class="chips small" id="ed-types"></div>
+                    </div>
+                </div>
+                <div class="row one">
+                    <div>
+                        <span class="f">Only these instruments <span class="hint">Leave all unselected to offer it on every instrument of the types above.</span></span>
+                        <div class="chips small" id="ed-instruments"></div>
+                        <div class="ferr" data-for="only_instruments"></div>
+                    </div>
+                </div>
+
+                <div id="ed-staff-fields">
+                    <div class="row one"><div>
+                        <label class="f" for="ed-hold">Holding actions <span class="hint">What the user should do while waiting. One per line.</span></label>
+                        <textarea id="ed-hold" style="min-height: 80px"></textarea>
+                    </div></div>
+                </div>
+                <div id="ed-normal-fields">
+                    <div class="row one"><div>
+                        <label class="f" for="ed-general">General checks <span class="hint">Shown as "Start here" when no symptom is picked, and below the symptom checks. One per line.</span></label>
+                        <textarea id="ed-general" style="min-height: 80px"></textarea>
+                    </div></div>
+                    <div class="row one"><div>
+                        <label class="f" for="ed-avoid">Please do not <span class="hint">Actions users should avoid. One per line.</span></label>
+                        <textarea id="ed-avoid" style="min-height: 64px"></textarea>
+                    </div></div>
+                </div>
+                <div class="row one"><div>
+                    <label class="f" for="ed-record">Write down for staff <span class="hint">Details users should note. One per line.</span></label>
+                    <textarea id="ed-record" style="min-height: 64px"></textarea>
+                </div></div>
+
+                <h3 style="margin: 6px 0 8px">Symptoms <span class="hint" style="display: inline; font-family: var(--sans)">What users can pick under "What you see".</span></h3>
+                <div id="ed-symptoms"></div>
+                <button type="button" class="btn-mi small" id="ed-add-sym">Add symptom</button>
+
+                <div class="actions">
+                    <button type="submit" class="btn-mi primary" id="ed-save">Save problem area</button>
+                    <button type="button" class="btn-mi" id="ed-cancel">Cancel</button>
+                    <span class="okmsg" id="ed-ok"></span>
+                </div>
+                <p class="errs" id="ed-error" role="alert" style="display: none"></p>
+            </form>
+
+            <section class="card-mi" id="mi-preview-box" style="display: none; margin-top: 18px">
+                <div class="kbhead">
+                    <h3>Preview: what users see</h3>
+                    <select id="pv-instrument" style="width: auto; max-width: 220px" aria-label="Preview for instrument"></select>
+                </div>
+                <p class="meta">Click the symptoms to see their checks. The preview follows your edits before saving.</p>
+                <div class="chips" id="pv-symptoms" style="margin-bottom: 12px"></div>
+                <aside class="panel" id="pv-panel" style="position: static; max-height: none"></aside>
+            </section>
+        </div>
+    </div>
+</div>
+</div>
+
+<script>
+(function () {
+    var SELECTED = {{ selected_area|tojson }};
+    var cat = null, editing = null, sevById = {}, instById = {}, pvTicked = [];
+
+    function esc(t) { return $('<div>').text(t == null ? '' : t).html(); }
+    function lines(sel) { return $(sel).val().split('\n').map(function (x) { return x.trim(); }).filter(Boolean); }
+    function chip(value, label, checked, cls) {
+        return $('<label class="chip">').addClass(cls || '').append(
+            $('<input type="checkbox">').val(value).prop('checked', !!checked), $('<span>').text(label));
+    }
+    function checkedVals(box) {
+        return $(box).find('input:checked').map(function () { return $(this).val(); }).get();
+    }
+    // Instrument types an area or symptom applies to (from only_types / not_types)
+    function allowedTypes(item) {
+        var all = Object.keys(cat.instrument_types);
+        if (item.only_types && item.only_types.length) return item.only_types.slice();
+        return all.filter(function (t) { return (item.not_types || []).indexOf(t) < 0; });
+    }
+    function instName(id) { return instById[id] ? instById[id].name : '#' + id; }
+
+    function load(data) {
+        cat = data;
+        cat.severities.forEach(function (s) { sevById[s.id] = s; });
+        cat.instruments.forEach(function (i) { instById[i.id] = i; });
+        renderList();
+    }
+
+    function post(path, data, onOk) {
+        $('#ed-error').hide();
+        return MI.post(path, $.extend({version: cat.version}, data), onOk, '#ed-error')
+            .fail(function () { $('#ed-error').show(); });
+    }
+
+    // ---------------- List ----------------
+    function renderList() {
+        var ul = $('#mi-list').empty();
+        cat.areas.forEach(function (a, i) {
+            var tags = '';
+            if (!a.builtin) tags += '<span class="tag new">added</span>';
+            if (a.changed) tags += '<span class="tag changed">changed</span>';
+            if (a.hidden) tags += '<span class="tag">hidden</span>';
+            var limits = [];
+            if (a.only_instruments && a.only_instruments.length) limits.push(a.only_instruments.map(instName).join(', '));
+            else if (allowedTypes(a).length < Object.keys(cat.instrument_types).length)
+                limits.push(allowedTypes(a).map(function (t) { return cat.instrument_types[t]; }).join(', '));
+            var li = $('<li class="kbitem">').toggleClass('dim', !!a.hidden)
+                .toggleClass('sel', !!(editing && editing.id === a.id)).append(
+                $('<div>').append($('<b>').text(a.label), tags),
+                $('<small>').text((a.symptoms || []).length + ' symptoms' +
+                                  (a.staffOnly ? ' · staff only' : '') +
+                                  (limits.length ? ' · only ' + limits.join('; ') : '')));
+            var btns = $('<div class="rowbtns">').appendTo(li);
+            function btn(label, act, cls) {
+                btns.append($('<button type="button" class="btn-mi small">').addClass(cls || '')
+                    .text(label).attr({'data-act': act, 'data-id': a.id}));
+            }
+            btn('Edit', 'edit');
+            btn(a.hidden ? 'Show' : 'Hide', a.hidden ? 'show' : 'hide');
+            if (a.changed) btn('Reset to built-in', 'reset');
+            if (i > 0) btn('↑', 'up');
+            if (i < cat.areas.length - 1) btn('↓', 'down');
+            ul.append(li);
+        });
+    }
+
+    $('#mi-list').on('click', 'button[data-act]', function () {
+        var act = $(this).data('act'), id = $(this).data('id');
+        if (act === 'edit') return edit(cat.areas.find(function (a) { return a.id === id; }));
+        post('/catalog/areas/' + encodeURIComponent(id) + '/' + act, {}, function (data) {
+            load(data.catalog);
+            if (editing && editing.id === id && act === 'reset') {
+                edit(cat.areas.find(function (a) { return a.id === id; }));
+            }
+        });
+    });
+
+    // ---------------- Editor ----------------
+    function sevOptions(sel, value, emptyLabel) {
+        $(sel).empty().append($('<option value="">').text(emptyLabel));
+        cat.severities.slice().sort(function (a, b) { return b.rank - a.rank; }).forEach(function (s) {
+            $(sel).append($('<option>').val(s.id).text(s.label));
+        });
+        $(sel).val(value || '');
+    }
+
+    function instrumentChips(box, selected) {
+        $(box).empty();
+        cat.instruments.forEach(function (i) {
+            $(box).append(chip(i.id, i.name, (selected || []).indexOf(i.id) >= 0));
+        });
+    }
+
+    function symptomRow(s) {
+        var row = $('<div class="symrow">').attr('data-id', s.id || '');
+        var r1 = $('<div class="row" style="margin-bottom: 8px">').appendTo(row);
+        r1.append($('<div>').append('<label class="f">Symptom the user sees <span class="req">*</span></label>',
+                                    $('<input type="text" class="s-label" maxlength="200">').val(s.label || '')));
+        var sev = $('<select class="s-sev">');
+        r1.append($('<div>').append('<label class="f">Raise urgency to at least</label>', sev));
+        sevOptions(sev, s.minSeverity, 'No change');
+        row.append($('<label class="f">').append('Checks to try ',
+            $('<span class="hint">').text('One per line. Leave empty if only staff can act.')),
+            $('<textarea class="s-steps" style="min-height: 72px">').val((s.steps || []).join('\n')));
+        var only = s.only_instruments || [];
+        var det = $('<details>').prop('open', only.length > 0).append(
+            $('<summary>').text('Only on some instruments' + (only.length ? ' (' + only.length + ')' : '')),
+            $('<div class="chips small s-inst">'));
+        instrumentChips(det.find('.s-inst'), only);
+        row.append(det, $('<div class="ferr s-err">'));
+        row.append($('<div class="actions" style="margin-top: 8px">').append(
+            $('<button type="button" class="btn-mi small s-up">').text('↑'),
+            $('<button type="button" class="btn-mi small s-down">').text('↓'),
+            $('<button type="button" class="btn-mi small s-remove">').text('Remove symptom')));
+        return row;
+    }
+
+    function edit(area) {
+        editing = area || {id: null, label: '', symptoms: []};
+        $('#mi-ed-title').text(area ? 'Edit "' + area.label + '"' : 'New problem area');
+        $('#ed-label').val(editing.label);
+        $('#ed-type').val(editing.staffOnly ? 'staff' : 'normal');
+        sevOptions('#ed-min', editing.minSeverity, 'No change');
+        var types = allowedTypes(editing), tbox = $('#ed-types').empty();
+        Object.keys(cat.instrument_types).forEach(function (t) {
+            tbox.append(chip(t, cat.instrument_types[t], types.indexOf(t) >= 0));
+        });
+        instrumentChips('#ed-instruments', editing.only_instruments);
+        ['hold', 'general', 'avoid', 'record'].forEach(function (k) {
+            $('#ed-' + k).val((editing[k] || []).join('\n'));
+        });
+        var box = $('#ed-symptoms').empty();
+        (editing.symptoms || []).forEach(function (s) { box.append(symptomRow(s)); });
+        clearErrors();
+        $('#ed-ok').text('');
+        toggleType();
+        $('#mi-editor-empty').hide();
+        $('#mi-editor, #mi-preview-box').show();
+        pvTicked = [];
+        renderList();
+        preview();
+    }
+
+    function toggleType() {
+        var staff = $('#ed-type').val() === 'staff';
+        $('#ed-staff-fields').toggle(staff);
+        $('#ed-normal-fields').toggle(!staff);
+    }
+
+    function formArea() {
+        return {
+            id: editing.id,
+            label: $('#ed-label').val(),
+            staffOnly: $('#ed-type').val() === 'staff',
+            minSeverity: $('#ed-min').val(),
+            only_types: checkedVals('#ed-types'),
+            only_instruments: checkedVals('#ed-instruments').map(Number),
+            hold: lines('#ed-hold'), general: lines('#ed-general'),
+            avoid: lines('#ed-avoid'), record: lines('#ed-record'),
+            symptoms: $('#ed-symptoms .symrow').map(function () {
+                var r = $(this);
+                return {id: r.attr('data-id') || null, label: r.find('.s-label').val(),
+                        minSeverity: r.find('.s-sev').val(),
+                        steps: r.find('.s-steps').val().split('\n').map(function (x) { return x.trim(); }).filter(Boolean),
+                        only_instruments: checkedVals(r.find('.s-inst')).map(Number)};
+            }).get()
+        };
+    }
+
+    function clearErrors() {
+        $('#mi-editor .invalid').removeClass('invalid');
+        $('#mi-editor .ferr').text('');
+        $('#ed-error').hide();
+    }
+
+    function showErrors(errors) {
+        Object.keys(errors || {}).forEach(function (k) {
+            var m = k.match(/^symptoms\.(\d+)\.(.*)$/);
+            if (m) {
+                var row = $('#ed-symptoms .symrow').eq(+m[1]);
+                if (m[2] === 'label') row.find('.s-label').addClass('invalid');
+                row.find('.s-err').text(errors[k]);
+            } else {
+                $('#mi-editor .ferr[data-for=' + k + ']').text(errors[k]);
+                if (k === 'label') $('#ed-label').addClass('invalid');
+            }
+        });
+    }
+
+    $('#mi-editor').on('submit', function (e) {
+        e.preventDefault();
+        clearErrors();
+        var area = formArea();
+        if (!area.only_types.length) {
+            $('#ed-error').text('Pick at least one instrument type.').show();
+            return;
+        }
+        $('#ed-save').prop('disabled', true);
+        $.ajax({
+            url: MI.api + '/catalog/areas', type: 'POST', dataType: 'json',
+            contentType: 'application/json; charset=utf-8',
+            data: JSON.stringify({version: cat.version, area: area}),
+            headers: {'X-MI-CSRF': MI.csrf}
+        }).done(function (data) {
+            load(data.catalog);
+            edit(cat.areas.find(function (a) { return a.id === data.area.id; }));
+            $('#ed-ok').text('Saved. New reports use it now.');
+        }).fail(function (xhr) {
+            var body = xhr.responseJSON || {};
+            showErrors(body.errors);
+            $('#ed-error').text(body.error || ('Could not save (' + xhr.status + ').')).show();
+        }).always(function () { $('#ed-save').prop('disabled', false); });
+    });
+
+    $('#ed-cancel').on('click', function () {
+        editing = null;
+        $('#mi-editor, #mi-preview-box').hide();
+        $('#mi-editor-empty').show();
+        renderList();
+    });
+    $('#mi-new').on('click', function () { edit(null); $('#ed-label').focus(); });
+    $('#ed-type').on('change', toggleType);
+    $('#ed-add-sym').on('click', function () {
+        $('#ed-symptoms').append(symptomRow({}));
+        $('#ed-symptoms .symrow:last .s-label').focus();
+        preview();
+    });
+    $('#ed-symptoms').on('click', '.s-remove', function () { $(this).closest('.symrow').remove(); preview(); })
+        .on('click', '.s-up', function () { var r = $(this).closest('.symrow'); r.prev().before(r); preview(); })
+        .on('click', '.s-down', function () { var r = $(this).closest('.symrow'); r.next().after(r); preview(); });
+    $('#mi-editor').on('input change', preview);
+
+    // ---------------- Preview (same layout as the report form) ----------------
+    function applies(item, inst) {
+        if (!inst) return true;
+        var types = item.only_types && item.only_types.length ? item.only_types : null;
+        return (!types || types.indexOf(inst.instrument_type) >= 0) &&
+            (!item.only_instruments || !item.only_instruments.length ||
+             item.only_instruments.indexOf(inst.id) >= 0);
+    }
+
+    function plainList(title, items, cls) {
+        if (!items || !items.length) return '';
+        return '<div class="group ' + (cls || '') + '"><h3>' + esc(title) + '</h3><ul class="plain">' +
+            items.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul></div>';
+    }
+
+    function preview() {
+        if (!editing) return;
+        var area = formArea(), sel = $('#pv-instrument'), keep = sel.val();
+        sel.empty().append($('<option value="">').text('Any instrument'));
+        cat.instruments.forEach(function (i) { sel.append($('<option>').val(i.id).text(i.name)); });
+        sel.val(keep || '');
+        var inst = instById[sel.val()];
+        var box = $('#pv-symptoms').empty();
+        if (inst && !applies(area, inst)) {
+            $('#pv-panel').attr('class', 'panel').html('<div class="rail"></div><div class="pbody">' +
+                '<p class="panel-empty">This problem area is not offered for ' + esc(inst.name) + '.</p></div>');
+            return;
+        }
+        var symptoms = area.symptoms.filter(function (s) { return s.label.trim() && applies(s, inst); });
+        if (!symptoms.length) box.append('<p class="empty-note">No presets for this area.</p>');
+        symptoms.forEach(function (s, i) {
+            box.append(chip(i, s.label, pvTicked.indexOf(s.label) >= 0));
+        });
+        var picked = symptoms.filter(function (s) { return pvTicked.indexOf(s.label) >= 0; });
+        var sev = area.minSeverity || null;
+        picked.forEach(function (s) {
+            if (s.minSeverity && (!sev || sevById[s.minSeverity].rank > sevById[sev].rank)) sev = s.minSeverity;
+        });
+        var html = '<div class="rail"></div><div class="pbody"><h2>While you wait for staff</h2>';
+        if (sev) html += '<p class="meta">Sent with at least <b>' + esc(sevById[sev].label) + '</b> urgency.</p>';
+        if (sev === 'stop') html += '<div class="callout"><p><b>Stop the run and call staff now.</b> Only do the holding actions below.</p></div>';
+        if (area.staffOnly) {
+            html += '<div class="callout staff"><p><b>Staff action only.</b> Do not try to fix this yourself.</p></div>';
+            html += plainList('Holding actions', area.hold) + plainList('Write down for staff', area.record);
+        } else {
+            var groups = picked.filter(function (s) { return s.steps.length; })
+                .map(function (s) { return {title: s.label, steps: s.steps}; });
+            if (area.general.length) groups.push({title: groups.length ? 'General checks' : 'Start here', steps: area.general});
+            groups.forEach(function (g) {
+                html += '<div class="group"><h3>' + esc(g.title) + '</h3><ul class="steps">' +
+                    g.steps.map(function (s) { return '<li><label><input type="checkbox"><span>' + esc(s) + '</span></label></li>'; }).join('') +
+                    '</ul></div>';
+            });
+            html += plainList('Please do not', area.avoid, 'avoid') + plainList('Write down for staff', area.record);
+        }
+        $('#pv-panel').attr('class', 'panel' + (sev ? ' sev-' + sev : '')).html(html + '</div>');
+    }
+
+    $('#pv-instrument').on('change', preview);
+    $('#pv-symptoms').on('change', 'input', function () {
+        var label = $(this).next('span').text();
+        pvTicked = this.checked ? pvTicked.concat([label]) : pvTicked.filter(function (x) { return x !== label; });
+        preview();
+    });
+
+    $.getJSON(MI.api + '/catalog').done(function (data) {
+        load(data);
+        $('#mi-loading').hide();
+        $('#mi-kb').show();
+        if (SELECTED) {
+            var a = cat.areas.find(function (x) { return x.id === SELECTED; });
+            if (a) edit(a);
+        }
+    }).fail(function (xhr) {
+        $('#mi-loading').css('color', 'var(--stop)')
+            .text('Could not load the problem areas (' + xhr.status + '). Please reload the page.');
+    });
+})();
+</script>

@@ -29,6 +29,7 @@ EMhub pages (content_id -> template) of the Microscope Issues module:
     mi_issue     Issue detail, history, comments, files and actions (managers)
     mi_insights  Insights (managers): trends, response, downtime, backlog
     mi_settings  Admin settings: notifications, instruments, delivery health
+    mi_catalog   Problem areas, symptoms and waiting advice (managers)
 """
 
 import datetime as dt
@@ -74,7 +75,7 @@ def register_content(dc):
             'filters': {'status': status, 'instrument_id': instrument_id,
                         'mine': mine, 'assigned': assigned},
             'severities': svc.severities(),
-            'areas': {a['id']: a['label'] for a in svc.problem_areas()},
+            'areas': {a['id']: a['label'] for a in svc.problem_areas(include_hidden=True)},
             'is_admin': ADMIN in roles,
             'csrf_token': csrf_token(),
         }
@@ -135,11 +136,24 @@ def register_content(dc):
             'issue': data,
             'created': kwargs.get('created') == '1' and data['is_mine'],
             'severities': svc.severities(),
-            'areas': {a['id']: a['label'] for a in svc.problem_areas()},
+            'areas': {a['id']: a['label'] for a in svc.problem_areas(include_hidden=True)},
             'managers': svc.manager_users(),
             'resolution_types': kb['resolution_types'],
             'root_causes': kb['root_causes'],
             'notices': [svc.notice_json(n) for n in svc.notices(issue.instrument_id)],
+            'csrf_token': csrf_token(),
+        }
+
+    @dc.content
+    def mi_catalog(**kwargs):
+        svc = _svc()
+        roles = svc.roles()
+        require(roles, MANAGER)
+        return {
+            'is_manager': True,
+            'is_admin': ADMIN in roles,
+            'facility_name': svc.config().get('facility_name') or 'Cryo-EM Facility',
+            'selected_area': str(kwargs.get('area') or ''),
             'csrf_token': csrf_token(),
         }
 

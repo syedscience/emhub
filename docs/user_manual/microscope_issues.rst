@@ -18,9 +18,10 @@ Reporting an issue
 1. Open **Microscope Issues** (managers: click **Report an issue**), or use a link that
    preselects an instrument: ``/main?content_id=mi_report&resource_id=<id>``
    (useful for QR codes placed next to each instrument).
-2. Select the instrument and the problem area. Only problem areas relevant to
-   that type of instrument are listed (for example, cryo-FIB problems are not
-   offered for a TEM).
+2. Select the instrument, fill in the session details (detector, acquisition
+   software, session type, session status, when it started) and choose the
+   problem area. Only problem areas for that instrument are listed (for
+   example, cryo-FIB problems are not offered for a TEM).
 3. Tick the symptoms you see. A **While you wait** panel shows what to do now,
    checks you can safely make, what to avoid and what to include in the report.
 4. Choose how urgent the problem is. Some problems (for example vacuum or LN2
@@ -92,6 +93,32 @@ than raw counts between instruments.
 **Export CSV** downloads the issues of the period (managers only). A weekly summary can be emailed every Monday morning (set the
 recipients in **Settings**).
 
+
+Problem areas
+-------------
+
+Managers change what users can pick on the report form in **Problem areas**
+(a tab on the report page, and a button on the issue list). For each area:
+
+* the name users see, and whether users can try checks or only staff can act
+  (users then get holding actions);
+* a minimum urgency: reports in the area are sent with at least that urgency;
+* which instrument types it is offered for, and optionally only some
+  instruments (for example an area only for Krios01);
+* general checks ("Start here"), things not to do, holding actions and what to
+  write down for staff, one per line;
+* the symptoms, each with its own checks, minimum urgency and optionally only
+  some instruments.
+
+A preview shows the report form and the **While you wait** panel as a user
+on a chosen instrument sees them. Changes apply to new reports at once and are
+recorded. Areas can be reordered and hidden; issues already reported in a
+hidden area keep its name. A changed built-in area can be reset to the
+version shipped with EMhub.
+
+The built-in areas (``emhub/issues/knowledge/problem_areas.json``) are a
+starting point: facility staff should review them against their own
+procedures.
 
 Importing old logbooks
 ----------------------
@@ -210,7 +237,6 @@ Settings (``config:issues``)
         }
     }
 
-``problem_areas`` can also be set here to replace the default list of problem
-areas, symptoms and troubleshooting guidance
-(``emhub/issues/knowledge/problem_areas.json``). The default guidance is a
-starting point: facility staff should review it against their own procedures.
+``facility_name`` and ``staff_phone`` set the name shown on the report form and
+the phone number shown for "Stop now" problems. Problem areas are edited in
+the **Problem areas** page, not here.

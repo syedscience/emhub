@@ -125,4 +125,24 @@
 .mi .avoid h3{color:var(--stop)}
 .mi .panel-empty{color:var(--muted)}
 .mi .foot{margin-top:14px;font-size:13.5px;color:var(--muted)}
+
+/* Problem-area editor */
+.mi .kbwrap{display:grid;grid-template-columns:minmax(280px,380px) 1fr;gap:18px;align-items:start}
+@media (max-width:1000px){.mi .kbwrap{grid-template-columns:1fr}}
+.mi .card-mi{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:14px 16px}
+.mi .kbhead{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px}
+.mi .kblist{list-style:none;margin:0;padding:0}
+.mi .kbitem{display:flex;flex-direction:column;gap:6px;padding:9px 6px;border-top:1px solid var(--line)}
+.mi .kbitem:first-child{border-top:0}
+.mi .kbitem.sel{background:var(--surface-2);border-radius:6px}
+.mi .kbitem.dim b{color:var(--muted);text-decoration:line-through}
+.mi .kbitem small{color:var(--muted)}
+.mi .rowbtns{display:flex;gap:6px;flex-wrap:wrap}
+.mi .tag{display:inline-block;padding:0 7px;border-radius:999px;font-size:12px;border:1px solid var(--line);color:var(--muted);margin-left:4px;font-weight:400}
+.mi .tag.changed{color:var(--block);border-color:var(--block)}
+.mi .tag.new{color:var(--ok);border-color:var(--ok)}
+.mi .symrow{border:1px solid var(--line);border-radius:6px;padding:10px 12px;margin-bottom:10px;background:var(--surface-2)}
+.mi .chips.small .chip span{padding:3px 9px;font-size:12.5px}
+.mi .okmsg{color:var(--ok);font-size:13.5px}
+.mi details > summary{cursor:pointer;color:var(--primary);font-size:13.5px;margin:4px 0}
 </style>

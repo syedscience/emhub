@@ -31,6 +31,7 @@ All records live in one hidden EMhub project with status 'special:issues'
     mi_notice          service notice
     mi_message         queued notification (email, Teams)
     mi_audit           change to the module settings
+    mi_catalog         the facility's changes to the problem areas (one entry)
 
 The record is stored as JSON in entry.extra['data']. Entries are written
 directly with the EMhub database session, so the worker can save without a
@@ -49,7 +50,8 @@ ISSUE_TYPE = 'microscope_issue'
 NOTICE_TYPE = 'mi_notice'
 MESSAGE_TYPE = 'mi_message'
 AUDIT_TYPE = 'mi_audit'
-ENTRY_TYPES = (ISSUE_TYPE, NOTICE_TYPE, MESSAGE_TYPE, AUDIT_TYPE)
+CATALOG_TYPE = 'mi_catalog'
+ENTRY_TYPES = (ISSUE_TYPE, NOTICE_TYPE, MESSAGE_TYPE, AUDIT_TYPE, CATALOG_TYPE)
 
 
 class Conflict(Exception):
@@ -287,3 +289,32 @@ class IssueStore:
 
     def audit_events(self):
         return [self._load(AuditEvent, e) for e in self._query(AUDIT_TYPE)]
+
+    # ------------------------- Problem areas ---------------------------------
+    def catalog(self):
+        """ The facility's changes to the built-in problem areas, as saved by
+        the problem-area editor ({} until the first change). """
+        if self.existing_project_id() is None:
+            return {}
+        entry = self._query(CATALOG_TYPE).first()
+        return dict((entry.extra or {}).get('data') or {}) if entry else {}
+
+    def save_catalog(self, data, version, user=None):
+        """ Save the problem-area changes. Raises Conflict if someone else
+        saved them since 'version' was read. """
+        entry = self._query(CATALOG_TYPE).first()
+        current = {}
+        if entry is not None:
+            self.session.refresh(entry)
+            current = (entry.extra or {}).get('data') or {}
+        if current.get('version', 0) != version:
+            raise Conflict('The problem areas were changed by someone else. '
+                           'Reload the page and try again.')
+        if entry is None:
+            entry = self._new_entry(CATALOG_TYPE, 'Problem areas', utcnow(), user)
+        data = dict(data, version=version + 1)
+        entry.extra = {'data': data}
+        entry.last_update_date = utcnow()
+        if uid := self._user_id(user):
+            entry.last_update_user_id = uid
+        return data
