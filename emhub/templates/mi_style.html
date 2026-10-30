@@ -38,10 +38,10 @@
 .mi .sect{padding:18px 0 4px;border-top:1px solid var(--line)}
 .mi .sect:first-of-type{border-top:0}
 .mi .sect > h2{margin-bottom:12px}
-.mi .row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 14px;margin:0 0 12px}
-.mi .row.three{grid-template-columns:repeat(3,minmax(0,1fr))}
-@media (max-width:720px){.mi .row,.mi .row.three{grid-template-columns:1fr}}
-.mi .row.one{grid-template-columns:1fr}
+.mi .frow{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 14px;margin:0 0 12px}
+.mi .frow.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media (max-width:720px){.mi .frow,.mi .frow.three{grid-template-columns:1fr}}
+.mi .frow.one{grid-template-columns:1fr}
 .mi label.f,.mi .f{display:block;font-size:13.5px;font-weight:600;margin-bottom:4px}
 .mi .req{color:var(--stop)}
 .mi .hint{display:block;font-weight:400;color:var(--muted);font-size:13px}
@@ -180,6 +180,7 @@
 .mi table.mi-table thead th{background:var(--surface-2);font-weight:600;color:var(--ink);border-bottom:1px solid var(--line)}
 .mi table.mi-table tbody tr:hover td{background:var(--surface-2)}
 .mi table.mi-table a{font-weight:600}
+.mi table.mi-table td:first-child{white-space:nowrap}
 .mi .dataTables_wrapper{color:var(--muted);font-size:13.5px}
 .mi .dataTables_wrapper input,.mi .dataTables_wrapper select{background:var(--surface-2);border:1px solid var(--line);border-radius:6px;padding:4px 8px}
 .mi .dataTables_wrapper .page-link{color:var(--ink);border-color:var(--line)}

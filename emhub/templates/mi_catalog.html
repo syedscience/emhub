@@ -30,7 +30,7 @@
 
             <form class="card-mi" id="mi-editor" novalidate style="display: none; padding: 16px 20px">
                 <h2 id="mi-ed-title" style="margin-bottom: 14px">Edit problem area</h2>
-                <div class="row">
+                <div class="frow">
                     <div>
                         <label class="f" for="ed-label">Name users will see <span class="req">*</span></label>
                         <input type="text" id="ed-label" maxlength="120">
@@ -51,13 +51,13 @@
                     </div>
                 </div>
 
-                <div class="row one">
+                <div class="frow one">
                     <div>
                         <span class="f">Instrument types <span class="hint">Offered for these types of instrument.</span></span>
                         <div class="chips small" id="ed-types"></div>
                     </div>
                 </div>
-                <div class="row one">
+                <div class="frow one">
                     <div>
                         <span class="f">Only these instruments <span class="hint">Leave all unselected to offer it on every instrument of the types above.</span></span>
                         <div class="chips small" id="ed-instruments"></div>
@@ -66,22 +66,22 @@
                 </div>
 
                 <div id="ed-staff-fields">
-                    <div class="row one"><div>
+                    <div class="frow one"><div>
                         <label class="f" for="ed-hold">Holding actions <span class="hint">What the user should do while waiting. One per line.</span></label>
                         <textarea id="ed-hold" style="min-height: 80px"></textarea>
                     </div></div>
                 </div>
                 <div id="ed-normal-fields">
-                    <div class="row one"><div>
+                    <div class="frow one"><div>
                         <label class="f" for="ed-general">General checks <span class="hint">Shown as "Start here" when no symptom is picked, and below the symptom checks. One per line.</span></label>
                         <textarea id="ed-general" style="min-height: 80px"></textarea>
                     </div></div>
-                    <div class="row one"><div>
+                    <div class="frow one"><div>
                         <label class="f" for="ed-avoid">Please do not <span class="hint">Actions users should avoid. One per line.</span></label>
                         <textarea id="ed-avoid" style="min-height: 64px"></textarea>
                     </div></div>
                 </div>
-                <div class="row one"><div>
+                <div class="frow one"><div>
                     <label class="f" for="ed-record">Write down for staff <span class="hint">Details users should note. One per line.</span></label>
                     <textarea id="ed-record" style="min-height: 64px"></textarea>
                 </div></div>
@@ -208,7 +208,7 @@
 
     function symptomRow(s) {
         var row = $('<div class="symrow">').attr('data-id', s.id || '');
-        var r1 = $('<div class="row" style="margin-bottom: 8px">').appendTo(row);
+        var r1 = $('<div class="frow" style="margin-bottom: 8px">').appendTo(row);
         r1.append($('<div>').append('<label class="f">Symptom the user sees <span class="req">*</span></label>',
                                     $('<input type="text" class="s-label" maxlength="200">').val(s.label || '')));
         var sev = $('<select class="s-sev">');

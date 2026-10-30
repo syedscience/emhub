@@ -29,7 +29,7 @@
             <fieldset id="mi-fields" disabled>
                 <section class="sect">
                     <h2>Who and where</h2>
-                    <div class="row">
+                    <div class="frow">
                         <div>
                             <label class="f" for="mi-name">Your name <span class="hint">From your EMhub login.</span></label>
                             <input type="text" id="mi-name" value="{{ reporter.name }}{% if reporter.email %} ({{ reporter.email }}){% endif %}" readonly>
@@ -39,7 +39,7 @@
                             <input type="text" id="mi-lab" value="{{ reporter.pi or 'Not set' }}" readonly>
                         </div>
                     </div>
-                    <div class="row one">
+                    <div class="frow one">
                         <div>
                             <label class="f" for="mi-contact">Where staff can find you <span class="hint">Room, or Teams name or phone number if you are remote.</span></label>
                             <input type="text" id="mi-contact" name="contact" maxlength="256">
@@ -50,7 +50,7 @@
 
                 <section class="sect">
                     <h2>Instrument and session</h2>
-                    <div class="row">
+                    <div class="frow">
                         <div>
                             <label class="f" for="mi-instrument">Instrument <span class="req">*</span></label>
                             <select id="mi-instrument" name="instrument_id"></select>
@@ -77,7 +77,7 @@
                             <select id="mi-onset" data-context="onset"></select>
                         </div>
                     </div>
-                    <div class="row" id="mi-occurred-row" style="display: none">
+                    <div class="frow" id="mi-occurred-row" style="display: none">
                         <div>
                             <label class="f" for="mi-occurred">About when did it first happen? <span class="hint">Optional.</span></label>
                             <input type="datetime-local" id="mi-occurred" name="occurred_at">
@@ -88,14 +88,14 @@
 
                 <section class="sect">
                     <h2>What is wrong</h2>
-                    <div class="row one">
+                    <div class="frow one">
                         <div>
                             <label class="f" for="mi-area">Problem area <span class="req">*</span></label>
                             <select id="mi-area" name="problem_area"></select>
                             <div class="ferr" data-for="problem_area"></div>
                         </div>
                     </div>
-                    <div class="row one">
+                    <div class="frow one">
                         <div>
                             <span class="f" id="mi-sym-label">What you see <span class="hint" style="display: inline">Pick all that apply.</span></span>
                             <div class="chips" id="mi-symptoms" role="group" aria-labelledby="mi-sym-label">
@@ -103,7 +103,7 @@
                             <div class="ferr" data-for="symptoms"></div>
                         </div>
                     </div>
-                    <div class="row one">
+                    <div class="frow one">
                         <div>
                             <label class="f" for="mi-title">Short summary <span class="hint">Optional. If left empty, the problem area and what you see are used.</span></label>
                             <input type="text" id="mi-title" name="title" maxlength="200"
@@ -111,20 +111,20 @@
                             <div class="ferr" data-for="title"></div>
                         </div>
                     </div>
-                    <div class="row one">
+                    <div class="frow one">
                         <div>
                             <label class="f" for="mi-description">Describe the problem <span class="hint">Include exact error text, the step it happened on, and anything that changed just before.</span></label>
                             <textarea id="mi-description" name="description" maxlength="10000"></textarea>
                             <div class="ferr" data-for="description"></div>
                         </div>
                     </div>
-                    <div class="row one">
+                    <div class="frow one">
                         <div>
                             <label class="f" for="mi-tried">What you have already tried <span class="hint">Optional. Steps you tick on the right are added here.</span></label>
                             <textarea id="mi-tried" name="tried" maxlength="5000" style="min-height: 64px"></textarea>
                         </div>
                     </div>
-                    <div class="row one">
+                    <div class="frow one">
                         <div>
                             <label class="f" for="mi-files">Screenshots or log files <span class="hint">Optional. PNG, JPEG, GIF, PDF, TXT, LOG, CSV or JSON, up to 20 MB each.</span></label>
                             <input type="file" id="mi-files" multiple accept=".png,.jpg,.jpeg,.gif,.pdf,.txt,.log,.csv,.json">
