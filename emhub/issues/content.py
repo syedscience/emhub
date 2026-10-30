@@ -176,7 +176,7 @@ def register_content(dc):
     @dc.content
     def mi_settings(**kwargs):
         svc = _svc()
-        require(svc.roles(), ADMIN)
+        require(svc.roles(), MANAGER)
         outbox = svc.outbox_summary()
         return {
             **_page(svc),

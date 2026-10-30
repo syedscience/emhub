@@ -38,7 +38,7 @@ import secrets
 import flask
 import flask_login
 
-from .authz import Forbidden, ADMIN, MANAGER, require
+from .authz import Forbidden, MANAGER, require
 from .service import ValidationError, NotFound, Conflict
 
 issues_bp = flask.Blueprint('issues_api', __name__)
@@ -169,7 +169,7 @@ def get_issue(issue_id):
 @issues_bp.route('/instruments', methods=['GET'])
 def list_instruments():
     svc = _service()
-    show_all = flask.request.args.get('all') in ('1', 'true') and ADMIN in svc.roles()
+    show_all = flask.request.args.get('all') in ('1', 'true') and MANAGER in svc.roles()
     return flask.jsonify({'instruments': [i.json() for i in
                                           svc.instruments(reportable_only=not show_all)]})
 
@@ -280,7 +280,7 @@ def change_area(area_id, action):
 @issues_bp.route('/settings', methods=['GET'])
 def get_settings():
     svc = _service()
-    require(svc.roles(), ADMIN)
+    require(svc.roles(), MANAGER)
     return flask.jsonify({'notifications': svc.notification_settings(),
                           'webhooks': svc.webhook_names()})
 

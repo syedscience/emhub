@@ -26,9 +26,10 @@ Issue roles, derived from the EMhub user roles.
     reporter: any active EMhub user who can see the Microscope Issues tab.
               Reports issues and gets email updates about them, but cannot
               browse issues, their history or the insights.
-    manager:  EMhub managers (roles manager, head or admin). Triage and
-              resolve issues, see the full history, insights and exports.
-    admin:    EMhub admins. Module settings.
+    manager:  EMhub managers (roles manager, head or admin). Every page:
+              triage and resolve issues, full history, insights, exports,
+              problem areas and module settings.
+    admin:    EMhub admins. Also the one-time logbook import.
 """
 
 REPORTER, MANAGER, ADMIN = 'reporter', 'manager', 'admin'

@@ -145,11 +145,11 @@ Who can see what
 * **Users** (anyone with access to the tab) can report issues, add files to
   their own report and see the service notices. They cannot open the list of
   issues, any issue page, the history or the insights.
-* **Managers** (EMhub roles ``manager``, ``head`` or ``admin``) see everything:
-  the issues, their full history, the insights and the CSV export, and handle
-  the issues.
-* **Admins** also change the notification settings and enable or disable
-  reporting for each instrument.
+* **Managers** (EMhub roles ``manager``, ``head`` or ``admin``) see every tab:
+  the issues, their full history, the insights and the CSV export, the problem
+  areas and the settings (notifications and which instruments take reports).
+  They handle the issues.
+* **Admins** can also run the one-time logbook import.
 
 Issues are stored in a hidden EMhub project. EMhub's generic project and entry
 pages and API routes (``entry_form``, ``/api/get_entries``,
@@ -203,7 +203,7 @@ report. Run one worker as a service:
 
 Email uses the EMhub mail settings (``MAIL_SERVER``, ``MAIL_PORT``,
 ``MAIL_USE_TLS``, ``MAIL_DEFAULT_SENDER``). Failed deliveries are retried with
-increasing delays; permanent failures are listed in **Settings** where admins
+increasing delays; permanent failures are listed in **Settings** where managers
 can retry them. The worker also alerts the escalation contacts when an issue is
 not acknowledged in time.
 

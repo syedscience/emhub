@@ -298,10 +298,10 @@ class TestIssues(unittest.TestCase):
 
     def test_disable_instrument(self):
         url = '/api/mi/instruments/%d' % self.vitrobot.id
-        r = self.post(self.client_for(self.manager), url, {'enabled': False}, user=self.manager)
-        self.assertEqual(r.status_code, 403)  # admins only
+        r = self.post(self.client_for(self.reporter), url, {'enabled': False}, user=self.reporter)
+        self.assertEqual(r.status_code, 403)  # managers only
 
-        r = self.post(self.client_for(self.admin), url, {'enabled': False}, user=self.admin)
+        r = self.post(self.client_for(self.manager), url, {'enabled': False}, user=self.manager)
         self.assertEqual(r.status_code, 200)
         try:
             r = self.report(instrument_id=self.vitrobot.id, problem_area='other', symptoms=[])
@@ -667,8 +667,8 @@ class TestIssues(unittest.TestCase):
         r = self.post(self.client_for(self.admin), '/api/mi/settings', bad, user=self.admin)
         self.assertEqual(r.status_code, 422)
         self.assertEqual(set(r.get_json()['errors']), {'email', 'webhooks', 'routes.0'})
-        r = self.post(self.client_for(self.manager), '/api/mi/settings', {}, user=self.manager)
-        self.assertEqual(r.status_code, 403)  # admins only
+        r = self.post(self.client_for(self.reporter), '/api/mi/settings', {}, user=self.reporter)
+        self.assertEqual(r.status_code, 403)  # managers only
 
     def run_worker(self, worker):
         while worker.run_once():
@@ -761,12 +761,16 @@ class TestIssues(unittest.TestCase):
         self.assertNotIn('escalated', [m.kind for m in self.outbox(acked['id'])])
 
     def test_settings_page(self):
-        status, html = self.content(self.admin, content_id='mi_settings')
-        self.assertNotIn('error-modal-title', html)
-        self.assertIn('teams-cryoem', html)
-        for user in (self.reporter, self.manager):
+        for user in (self.manager, self.admin):
             status, html = self.content(user, content_id='mi_settings')
-            self.assertIn('error-modal-title', html)
+            self.assertNotIn('error-modal-title', html)
+            self.assertIn('teams-cryoem', html)
+            self.assertIn('>Settings</a>', html)
+        status, html = self.content(self.reporter, content_id='mi_settings')
+        self.assertIn('error-modal-title', html)
+        # Users only get the report page, without the tabs
+        status, html = self.content(self.reporter, content_id='mi_report')
+        self.assertNotIn('class="tabs"', html)
 
     # ------------------------- insights --------------------------------------
     def test_insights_page_and_access(self):

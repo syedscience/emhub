@@ -37,7 +37,7 @@ import uuid
 import flask
 from werkzeug.utils import secure_filename
 
-from .authz import user_issue_roles, require, Forbidden, REPORTER, MANAGER, ADMIN
+from .authz import user_issue_roles, require, Forbidden, REPORTER, MANAGER
 from . import insights as mi_insights
 from .models import (Instrument, Issue, IssueSymptom, OutboxMessage,
                      AffectedUser, Attachment, DowntimeInterval, Notice,
@@ -439,7 +439,7 @@ class IssuesService:
 
     def set_instrument_enabled(self, instrument_id, enabled, user=None):
         user = user if user is not None else self.app.user
-        require(self.roles(user), ADMIN)
+        require(self.roles(user), MANAGER)
         inst = self.get_instrument(instrument_id)
         if inst is None:
             raise NotFound(f'Instrument {instrument_id} not found')
@@ -1012,7 +1012,7 @@ class IssuesService:
     def save_settings(self, payload, user=None):
         """ Validate and store the notification settings in config:issues. """
         user = user if user is not None else self.app.user
-        require(self.roles(user), ADMIN)
+        require(self.roles(user), MANAGER)
         errors = {}
         hooks = set(self.webhook_names())
         severities = self.severities()
@@ -1081,7 +1081,7 @@ class IssuesService:
 
     def send_test(self, channel, destination, user=None):
         user = user if user is not None else self.app.user
-        require(self.roles(user), ADMIN)
+        require(self.roles(user), MANAGER)
         destination = str(destination or '').strip()
         if channel == 'email' and not EMAIL_RE.match(destination):
             raise ValidationError({'destination': 'Enter a valid email address.'})
@@ -1098,7 +1098,7 @@ class IssuesService:
 
     def outbox_summary(self, user=None, check_access=True):
         if check_access:
-            require(self.roles(user), ADMIN)
+            require(self.roles(user), MANAGER)
         messages = self.store.messages()
         counts = {}
         for m in messages:
@@ -1110,7 +1110,7 @@ class IssuesService:
 
     def retry_message(self, message_id, user=None):
         user = user if user is not None else self.app.user
-        require(self.roles(user), ADMIN)
+        require(self.roles(user), MANAGER)
         try:
             msg = self.store.get_message(int(message_id))
         except (TypeError, ValueError):

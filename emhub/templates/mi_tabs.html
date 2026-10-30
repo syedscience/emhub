@@ -2,11 +2,9 @@
 {% if is_manager %}
     <nav class="tabs" aria-label="Views">
         {% for cid, label in [('mi_report', 'Report an issue'), ('mi_issues', 'Issue log'),
-                              ('mi_insights', 'Insights'), ('mi_catalog', 'Problem areas')] %}
+                              ('mi_insights', 'Insights'), ('mi_catalog', 'Problem areas'),
+                              ('mi_settings', 'Settings')] %}
             <a class="{{ 'on' if cid == active }}" href="{{ url_for_content(cid) }}">{{ label }}</a>
         {% endfor %}
-        {% if is_admin %}
-            <a class="{{ 'on' if active == 'mi_settings' }}" href="{{ url_for_content('mi_settings') }}">Settings</a>
-        {% endif %}
     </nav>
 {% endif %}
