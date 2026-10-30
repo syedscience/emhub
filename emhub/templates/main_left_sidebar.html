@@ -36,7 +36,7 @@
 
                             {% if view_microscope_issues %}
                             <li class="nav-item">
-                                <a class="nav-link" href="{{ url_for_content('mi_issues') }}">
+                                <a class="nav-link" href="{{ url_for_content('mi_issues' if current_user.is_manager else 'mi_report') }}">
                                     <i class="fas fa-exclamation-triangle"></i>Microscope Issues</a>
                             </li>
                             {% endif %}

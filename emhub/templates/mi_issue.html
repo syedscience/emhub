@@ -35,10 +35,7 @@
                         <span class="badge badge-danger ml-2">Instrument {{ issue.instrument_state }}</span>
                     {% endif %}
                     <span class="ml-auto">
-                    {% if not issue.is_mine and not issue.is_affected and is_open and not is_staff %}
-                        <button class="btn btn-sm btn-outline-primary" id="mi-join"><i class="fas fa-user-plus"></i> I'm also affected</button>
-                    {% endif %}
-                    {% if issue.is_participant and issue.status in ['resolved', 'closed'] %}
+                    {% if issue.status in ['resolved', 'closed'] %}
                         <button class="btn btn-sm btn-outline-danger" data-toggle="modal" data-target="#mi-reopen-modal">
                             <i class="fas fa-redo"></i> Reopen</button>
                     {% endif %}
@@ -72,9 +69,6 @@
                         {% if issue.affected %}
                             <dt class="col-sm-4">Also affected</dt>
                             <dd class="col-sm-8">{{ issue.affected|join(', ') }}</dd>
-                        {% elif issue.affected_count %}
-                            <dt class="col-sm-4">Also affected</dt>
-                            <dd class="col-sm-8">{{ issue.affected_count }} other user(s)</dd>
                         {% endif %}
                         {% for key, value in issue.context.items() %}
                             <dt class="col-sm-4">{{ key|replace('_', ' ')|capitalize }}</dt>
@@ -101,7 +95,6 @@
                 </div>
             </div>
 
-            {% if issue.is_participant %}
             <div class="card">
                 <div class="card-header"><h5 class="mb-0"><i class="fas fa-paperclip"></i> Files</h5></div>
                 <div class="card-body">
@@ -109,9 +102,8 @@
                         <ul class="list-unstyled">
                         {% for a in issue.attachments %}
                             <li class="mb-1">
-                                <a href="{{ url_for('issues_api.get_attachment', attachment_id=a.id) }}" target="_blank" rel="noopener">{{ a.filename }}</a>
+                                <a href="{{ url_for('issues_api.get_attachment', issue_id=issue.id, attachment_id=a.id) }}" target="_blank" rel="noopener">{{ a.filename }}</a>
                                 <small class="text-muted">{{ a.size|pretty_size }}, {{ a.uploaded_by_name }}</small>
-                                {% if a.internal %}<span class="badge badge-dark">staff only</span>{% endif %}
                             </li>
                         {% endfor %}
                         </ul>
@@ -119,24 +111,16 @@
                     <form class="form-inline" id="mi-upload-form">
                         <input type="file" class="form-control-file mr-2 mb-2" id="mi-files" name="file" multiple
                                accept=".png,.jpg,.jpeg,.gif,.pdf,.txt,.log,.csv,.json" style="max-width: 320px">
-                        {% if is_staff %}
-                        <label class="custom-control custom-checkbox mr-2 mb-2">
-                            <input type="checkbox" class="custom-control-input" id="mi-files-internal">
-                            <span class="custom-control-label">Staff only</span>
-                        </label>
-                        {% endif %}
                         <button type="submit" class="btn btn-sm btn-outline-primary mb-2">Upload</button>
                     </form>
                     <small class="text-muted">Screenshots, PDF or log files, up to 20 MB each.</small>
                 </div>
             </div>
-            {% endif %}
         </div>
 
         <div class="col-xl-5 col-lg-5 col-12">
-            {% if is_staff %}
             <div class="card border-primary">
-                <div class="card-header"><h5 class="mb-0"><i class="fas fa-tools"></i> Staff actions</h5></div>
+                <div class="card-header"><h5 class="mb-0"><i class="fas fa-tools"></i> Manager actions</h5></div>
                 <div class="card-body">
                     <div class="mb-3">
                         {% if issue.status in ['new', 'reopened'] %}
@@ -161,7 +145,7 @@
                             <label for="mi-assignee">Assigned to</label>
                             <select class="form-control form-control-sm" id="mi-assignee">
                                 <option value="">Nobody</option>
-                                {% for u in staff %}
+                                {% for u in managers %}
                                     <option value="{{ u.id }}" {{ 'selected' if u.id == issue.assignee_id }}>{{ u.name }}</option>
                                 {% endfor %}
                             </select>
@@ -199,31 +183,26 @@
                     {% endif %}
                 </div>
             </div>
-            {% endif %}
 
             <div class="card">
                 <div class="card-header"><h5 class="mb-0">History and comments</h5></div>
                 <div class="card-body">
-                    {% if issue.is_participant or is_staff %}
                     <form id="mi-comment-form" class="mb-3">
                         <textarea class="form-control mb-2" id="mi-comment" rows="3" maxlength="5000"
-                                  placeholder="{{ 'Reply or add a note' if is_staff else 'Add information for the staff' }}"></textarea>
+                                  placeholder="Reply to the reporter, or add an internal note"></textarea>
                         <div class="d-flex align-items-center">
-                            {% if is_staff %}
                             <label class="custom-control custom-checkbox mb-0 mr-3">
                                 <input type="checkbox" class="custom-control-input" id="mi-comment-internal">
-                                <span class="custom-control-label">Internal note (staff only)</span>
+                                <span class="custom-control-label">Internal note (not emailed to the reporter)</span>
                             </label>
-                            {% endif %}
                             <button type="submit" class="btn btn-sm btn-primary ml-auto">Comment</button>
                         </div>
                     </form>
-                    {% endif %}
                     <ul class="list-unstyled mb-0">
                         {% for e in issue.events|reverse %}
-                            <li class="mb-3 {{ 'border-left border-dark pl-2' if e.internal }}">
+                            <li class="mb-3 {{ 'border-left border-dark pl-2' if e.internal and e.kind == 'comment' }}">
                                 <small class="text-muted">{{ e.at|pretty_datetime }}
-                                    {% if e.internal %}<span class="badge badge-dark">staff only</span>{% endif %}</small><br>
+                                    {% if e.internal and e.kind == 'comment' %}<span class="badge badge-dark">internal note</span>{% endif %}</small><br>
                                 {% set who = (' by ' ~ e.actor_name) if e.actor_name else '' %}
                                 {% if e.kind == 'created' %}
                                     Reported{{ who }}
@@ -251,8 +230,6 @@
                                     Marked as duplicate of {{ e.data.duplicate_of }}{{ who }}
                                 {% elif e.kind == 'duplicate_merged' %}
                                     {{ e.data.ticket }} ({{ e.data.reporter }}) was merged into this issue{{ who }}
-                                {% elif e.kind == 'affected' %}
-                                    {{ e.actor_name }} is also affected
                                 {% elif e.kind == 'attachment' %}
                                     File {{ e.data.filename }} added{{ who }}
                                 {% elif e.kind == 'waiting_vendor' %}
@@ -386,8 +363,6 @@
         }, reload, '#mi-page-error');
     });
 
-    $('#mi-join').on('click', function () { MI.post(base + '/join', {}, reload, '#mi-page-error'); });
-
     $('#mi-comment-form').on('submit', function (e) {
         e.preventDefault();
         MI.post(base + '/comments', {text: $('#mi-comment').val(),
@@ -401,7 +376,6 @@
         if (!files.length) return;
         var form = new FormData();
         for (var i = 0; i < files.length; i++) form.append('file', files[i]);
-        form.append('internal', $('#mi-files-internal').is(':checked') ? '1' : '0');
         MI.post(base + '/attachments', form, reload, '#mi-page-error');
     });
 })();

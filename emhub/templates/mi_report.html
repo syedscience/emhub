@@ -3,8 +3,19 @@
 <div class="container-fluid dashboard-content">
     {% set title = "Report an issue" %}
     {% set about = "Tell the facility staff what is wrong. Your name and email are taken from your EMhub login." %}
-    {% set navigation = [('Microscope Issues', url_for_content('mi_issues')), ('Report an issue', '')] %}
+    {% if is_manager %}
+        {% set navigation = [('Microscope Issues', url_for_content('mi_issues')), ('Report an issue', '')] %}
+    {% else %}
+        {% set navigation = [('Report an issue', '')] %}
+    {% endif %}
     {% include 'include_header.html' %}
+
+    {% if submitted %}
+        <div class="alert alert-success">
+            Thank you, your report <strong>{{ submitted }}</strong> was saved and the facility staff
+            have been notified. You will get an email confirmation and updates as it is handled.
+        </div>
+    {% endif %}
 
     <div class="row">
         <div class="col-xl-7 col-lg-7 col-12">
@@ -23,12 +34,6 @@
                             <label for="mi-area">Problem area <span class="text-danger">*</span></label>
                             <select class="form-control" id="mi-area" name="problem_area" required></select>
                             <div class="invalid-feedback" data-for="problem_area"></div>
-                        </div>
-
-                        <div class="alert alert-info" id="mi-dups" style="display: none">
-                            <strong>Already reported on this instrument:</strong>
-                            <ul class="mb-1 mt-1 pl-3" id="mi-dups-list"></ul>
-                            <small>If one of these is your problem, click <em>I'm also affected</em> instead of sending a new report.</small>
                         </div>
 
                         <div class="form-group" id="mi-symptoms-group" style="display: none">
@@ -135,8 +140,10 @@
     var META_URL = "{{ url_for('issues_api.meta') }}";
     var CREATE_URL = "{{ url_for('issues_api.create_issue') }}";
     var ISSUE_URL = "{{ url_for_content('mi_issue') }}";
+    var REPORT_URL = "{{ url_for_content('mi_report') }}";
+    var IS_MANAGER = {{ is_manager|tojson }};
     var CSRF = "{{ csrf_token }}";
-    var dupRequest = 0;
+    var noticeRequest = 0;
     var SELECTED = {{ selected_instrument_id|tojson }};
     var meta = null, areasById = {}, sevRank = {};
     // One key per form load, so double clicks or retries create one issue
@@ -158,38 +165,17 @@
 
     function selectedArea() { return areasById[$('#mi-area').val()]; }
 
-    function renderNoticesAndDuplicates() {
-        var instId = $('#mi-instrument').val(), req = ++dupRequest;
+    function renderNotices() {
+        var instId = $('#mi-instrument').val(), req = ++noticeRequest;
         $('#mi-notices').empty();
-        $('#mi-dups').hide();
         if (!instId) return;
         $.getJSON(MI.api + '/notices', {instrument_id: instId}).done(function (data) {
-            if (req !== dupRequest) return;
+            if (req !== noticeRequest) return;
             data.notices.forEach(function (n) {
                 $('#mi-notices').append($('<div class="alert">').addClass('alert-' + n.level)
                     .text((n.instrument_name ? n.instrument_name + ': ' : '') + n.message));
             });
         });
-        $.getJSON(MI.api + '/duplicates', {instrument_id: instId, problem_area: $('#mi-area').val() || ''})
-            .done(function (data) {
-                if (req !== dupRequest) return;
-                var list = $('#mi-dups-list').empty();
-                data.issues.slice(0, 5).forEach(function (i) {
-                    var li = $('<li class="mb-1">');
-                    li.append($('<a target="_blank">').attr('href', MI.issueUrl(i.id)).text(i.ticket),
-                              document.createTextNode(' ' + i.title + ' (' + i.status.replace('_', ' ') + ') '));
-                    if (!i.is_mine) {
-                        li.append($('<button type="button" class="btn btn-xs btn-sm btn-outline-primary py-0">')
-                            .text("I'm also affected").on('click', function () {
-                                MI.post('/issues/' + i.id + '/join', {}, function () {
-                                    window.location.href = MI.issueUrl(i.id);
-                                }, '#mi-form-error');
-                            }));
-                    }
-                    list.append(li);
-                });
-                $('#mi-dups').toggle(data.issues.length > 0);
-            });
     }
 
     function renderAreas() {
@@ -210,7 +196,7 @@
         if (!area) {
             $('#mi-symptoms-group, #mi-guide').hide();
             updateBump();
-            renderNoticesAndDuplicates();
+            renderNotices();
             return;
         }
         (area.symptoms || []).forEach(function (s) {
@@ -219,7 +205,7 @@
                 $('<span class="custom-control-label">').text(s.label)));
         });
         $('#mi-symptoms-group').toggle((area.symptoms || []).length > 0);
-        renderNoticesAndDuplicates();
+        renderNotices();
 
         if (area.staffOnly) {
             guide.append($('<div class="alert alert-danger py-2">').text(
@@ -297,7 +283,10 @@
             headers: {'X-MI-CSRF': CSRF}
         }).done(function (data) {
             var done = function () {
-                window.location.href = ISSUE_URL + '&issue_id=' + data.issue.id + '&created=1';
+                // Only managers can open issues; reporters get a confirmation
+                window.location.href = IS_MANAGER
+                    ? ISSUE_URL + '&issue_id=' + data.issue.id + '&created=1'
+                    : REPORT_URL + '&submitted=' + encodeURIComponent(data.issue.ticket);
             };
             var files = $('#mi-files')[0].files;
             if (!files.length) return done();
@@ -308,7 +297,7 @@
             MI.post('/issues/' + data.issue.id + '/attachments', form, done).fail(function () {
                 $('#mi-form-error').removeClass('alert-danger').addClass('alert-warning').text(
                     'Your report ' + data.issue.ticket + ' was saved, but the files could not be ' +
-                    'uploaded. You can add them from the issue page.').show();
+                    'uploaded. Please send them to the facility staff by email.').show();
                 setTimeout(done, 4000);
             });
         }).fail(function (xhr) {

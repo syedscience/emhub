@@ -4,8 +4,10 @@ Microscope Issues
 *Module contributed by Syed Asfarul Haque (St. Jude Children's Research Hospital).*
 
 The Microscope Issues module lets facility users report instrument problems
-directly from EMhub and lets staff follow each report until the instrument is
-working again. It appears as its own **Microscope Issues** tab in the main menu.
+directly from EMhub and lets the EMhub managers follow each report until the
+instrument is working again. It appears as its own **Microscope Issues** tab in
+the main menu: for users it opens the report form, for managers the list of
+issues.
 
 The module is optional and disabled by default.
 
@@ -13,7 +15,7 @@ The module is optional and disabled by default.
 Reporting an issue
 ------------------
 
-1. Open **Microscope Issues** and click **Report an issue**, or use a link that
+1. Open **Microscope Issues** (managers: click **Report an issue**), or use a link that
    preselects an instrument: ``/main?content_id=mi_report&resource_id=<id>``
    (useful for QR codes placed next to each instrument).
 2. Select the instrument and the problem area. Only problem areas relevant to
@@ -24,8 +26,9 @@ Reporting an issue
 4. Choose how urgent the problem is. Some problems (for example vacuum or LN2
    alarms) are always treated as urgent, and the form says so when it raises
    the urgency.
-5. Click **Send report**. The report gets a ticket number (``MI-2026-00042``)
-   and the facility staff are notified.
+5. Click **Send report**. The report gets a ticket number (``MI-2026-00042``),
+   shown on the page, and the facility staff are notified. Screenshots, PDF or
+   log files (up to 20 MB) can be sent with the report.
 
 Your name and email come from your EMhub login; they are never typed in.
 
@@ -33,25 +36,22 @@ Your name and email come from your EMhub login; they are never typed in.
 Following an issue
 ------------------
 
-* If someone already reported the problem, the report form lists the open
-  issues on that instrument. Click **I'm also affected** to follow that issue
-  instead of creating a duplicate.
-* The issue page shows the history, comments and files (screenshots, PDF or
-  log files up to 20 MB). Reporters and affected users can comment, add files
-  and **reopen** a resolved issue if the problem comes back.
-* Reporters get an email receipt, and emails when staff acknowledge, reply,
-  resolve or reopen their issue.
+Reporters follow their report by email: a receipt, then an email when it is
+acknowledged, when a manager replies, and when it is resolved or reopened.
+These emails contain everything the reporter needs and no link, because only
+managers can open issues. If the problem comes back, the reporter contacts the
+facility and a manager reopens the issue.
 
 
-Staff workflow
---------------
+Manager workflow
+----------------
 
 Issues move through these states::
 
     New -> Acknowledged -> Investigating -> Waiting for vendor -> Resolved -> Closed
                                      (Reopened, Duplicate)
 
-* The first staff action (acknowledge, comment, change) is recorded as the
+* The first manager action (acknowledge, reply, change) is recorded as the
   **first response**. Acknowledging assigns the issue to you if nobody has it.
 * **Instrument state** (operational, degraded, unavailable) is separate from the
   ticket status. Changing it records downtime intervals, which are closed when
@@ -59,10 +59,13 @@ Issues move through these states::
   administrative closure.
 * **Resolve** asks how it was fixed, the root cause, notes, user time lost and
   whether data was lost. These feed the insights.
-* **Duplicate of...** closes an issue and adds its reporter to the original.
-* Comments and files can be marked **staff only**.
+* **Duplicate of...** closes an issue; its reporter then gets the updates of
+  the original issue.
+* A comment is a reply emailed to the reporter, unless it is marked as an
+  **internal note**.
 * **Post notice** shows a service banner (for one instrument or all of them)
-  on the issue pages and the report form, optionally until a given time.
+  on the report form, so users see it before reporting, optionally until a
+  given time.
 
 
 Insights
@@ -86,8 +89,7 @@ restoration time is measured to when the instrument was restored, not to
 ticket closure; booked hours are not operating hours, so compare rates rather
 than raw counts between instruments.
 
-**Export CSV** downloads the issues of the period with the same visibility as
-the pages. A weekly summary can be emailed every Monday morning (set the
+**Export CSV** downloads the issues of the period (managers only). A weekly summary can be emailed every Monday morning (set the
 recipients in **Settings**).
 
 
@@ -104,7 +106,7 @@ imported once as historical issues:
     emh-issues import-logbooks 223 --map 223=12 --commit  # logbook without instrument
 
 Imported issues keep their original dates, are closed if the last logbook
-action is ``solved``, keep the actions as staff-only notes, never send
+action is ``solved``, keep the actions as internal notes, never send
 notifications and are excluded from response and restoration times. Running
 the import again skips entries that were already imported. The logbooks
 themselves are not changed.
@@ -113,12 +115,20 @@ themselves are not changed.
 Who can see what
 ----------------
 
-* **Reporters** (any EMhub user with access to the tab) can report issues and
-  see all open issues, so they can check whether a problem is already known.
-  Contact details of other reporters are hidden.
-* **Staff** (EMhub managers, users with a ``staff-<unit>`` role, or roles
-  mapped in ``config:issues``) see full details of every issue.
-* **Admins** can enable or disable reporting for each instrument.
+* **Users** (anyone with access to the tab) can report issues, add files to
+  their own report and see the service notices. They cannot open the list of
+  issues, any issue page, the history or the insights.
+* **Managers** (EMhub roles ``manager``, ``head`` or ``admin``) see everything:
+  the issues, their full history, the insights and the CSV export, and handle
+  the issues.
+* **Admins** also change the notification settings and enable or disable
+  reporting for each instrument.
+
+Issues are stored in a hidden EMhub project. EMhub's generic project and entry
+pages and API routes (``entry_form``, ``/api/get_entries``,
+``/api/update_entry``...) refuse that project and its entries for every user,
+and leave them out of their lists, so the module pages are the only way to see
+or change them.
 
 Access to the tab itself is controlled with the ``microscope_issues`` key in
 the ``content`` section of ``config:permissions``. If the key is not present,
@@ -128,43 +138,36 @@ every logged-in user can see the tab.
 Setup
 -----
 
-Install the optional dependencies and enable the module in the instance
-``config.py``:
-
-.. code-block:: bash
-
-    pip install "emhub[issues]"
+Enable the module in the instance ``config.py`` and restart EMhub:
 
 .. code-block:: python
 
     EMHUB_ISSUES = True
-    # Optional, defaults to emhub-issues.sqlite in the instance folder.
-    # PostgreSQL is recommended for production; keep the password out of
-    # config.py by setting ISSUES_DB_URL in the environment instead.
-    ISSUES_DB_URL = 'postgresql+psycopg://user@localhost/emhub_issues'
 
-Issues are stored in their own database, separate from the EMhub SQLite file.
-EMhub users and resources are referenced by their ids, and instrument names are
-copied so the history is kept if a resource is renamed.
+There is no database to set up. Issues are stored in the EMhub database, as
+entries of a hidden project with status ``special:issues`` (created when the
+first issue is reported), the same way EMhub keeps its logbooks. They are
+backed up with the rest of the EMhub data. Each issue is one entry, with its
+history, symptoms, files and downtime kept in the entry; service notices,
+queued notifications and changes to the settings are entries of their own type
+(``mi_notice``, ``mi_message``, ``mi_audit``). Attached files are saved in the
+``issue_files`` folder of the instance.
 
-Then create the database schema and the default settings:
+Optionally create the default settings and check the instruments:
 
 .. code-block:: bash
 
     export EMHUB_INSTANCE=/path/to/instance
-    emh-issues migrate            # create or upgrade the issues database
     emh-issues init-config        # create the 'config:issues' form
-    emh-issues sync-instruments   # list EMhub resources and their type
-    emh-issues status             # check the schema is up to date
-
-Restart EMhub after enabling the module.
+    emh-issues instruments        # list EMhub resources and their type
+    emh-issues status             # where issues are stored and how many
 
 Notifications and the worker
 ............................
 
-Notifications are queued in the database together with the change that
-triggered them and sent by a separate worker process, so a mail or Teams
-outage never blocks or loses a report. Run it as a service:
+Notifications are saved together with the change that triggered them and sent
+by a separate worker process, so a mail or Teams outage never blocks or loses a
+report. Run one worker as a service:
 
 .. code-block:: bash
 
@@ -199,7 +202,7 @@ Settings (``config:issues``)
 .. code-block:: json
 
     {
-        "roles": {"staff": ["staff-cryoem"], "manager": ["head"], "admin": []},
+        "disabled_instruments": [],
         "notifications": {
             "email": ["cryoem-facility@example.org"],
             "webhooks": [],

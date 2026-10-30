@@ -3,7 +3,7 @@
 
 <div class="container-fluid dashboard-content">
     {% set title = "Microscope Issues" %}
-    {% set about = "Report instrument problems and follow them until they are fixed." %}
+    {% set about = "Every reported problem and its history. Only EMhub managers can see this page." %}
     {% set navigation = [('Microscope Issues', '')] %}
     {% include 'include_header.html' %}
 
@@ -12,9 +12,7 @@
             <span><i class="fas fa-bullhorn"></i>
                 {% if n.instrument_name %}<strong>{{ n.instrument_name }}:</strong>{% endif %} {{ n.message }}
                 {% if n.expires_at %}<small class="text-muted ml-1">(until {{ n.expires_at|pretty_datetime }})</small>{% endif %}</span>
-            {% if is_staff %}
-                <button type="button" class="btn btn-sm btn-link ml-auto mi-remove-notice" data-id="{{ n.id }}">Remove</button>
-            {% endif %}
+            <button type="button" class="btn btn-sm btn-link ml-auto mi-remove-notice" data-id="{{ n.id }}">Remove</button>
         </div>
     {% endfor %}
 
@@ -49,14 +47,12 @@
                         <option value="{{ inst.id }}" {{ 'selected' if filters.instrument_id == inst.id }}>{{ inst.name }}</option>
                     {% endfor %}
                 </select>
-                {% if is_staff %}
                 <label class="mr-2" for="mi-filter-assigned">Assigned</label>
                 <select class="form-control form-control-sm mr-3" id="mi-filter-assigned" name="assigned">
                     {% for value, label in [('', 'Anyone'), ('me', 'To me'), ('none', 'Nobody')] %}
                         <option value="{{ value }}" {{ 'selected' if (filters.assigned or '') == value }}>{{ label }}</option>
                     {% endfor %}
                 </select>
-                {% endif %}
                 <label class="custom-control custom-checkbox mr-3 mb-0">
                     <input class="custom-control-input" type="checkbox" id="mi-filter-mine" name="mine" value="1" {{ 'checked' if filters.mine }}>
                     <span class="custom-control-label">Only my reports</span>
@@ -64,13 +60,9 @@
                 <button type="submit" class="btn btn-sm btn-outline-primary">Filter</button>
             </form>
             <div class="ml-auto">
-                {% if is_staff %}
-                    <button type="button" class="btn btn-outline-secondary" data-toggle="modal" data-target="#mi-notice-modal">
-                        <i class="fas fa-bullhorn"></i> Post notice</button>
-                {% endif %}
-                {% if is_manager %}
-                    <a class="btn btn-outline-secondary" href="{{ url_for_content('mi_insights') }}"><i class="fas fa-chart-bar"></i> Insights</a>
-                {% endif %}
+                <button type="button" class="btn btn-outline-secondary" data-toggle="modal" data-target="#mi-notice-modal">
+                    <i class="fas fa-bullhorn"></i> Post notice</button>
+                <a class="btn btn-outline-secondary" href="{{ url_for_content('mi_insights') }}"><i class="fas fa-chart-bar"></i> Insights</a>
                 {% if is_admin %}
                     <a class="btn btn-outline-secondary" href="{{ url_for_content('mi_settings') }}"><i class="fas fa-cog"></i> Settings</a>
                 {% endif %}
@@ -90,6 +82,7 @@
                             <th>Title</th>
                             <th>Urgency</th>
                             <th>Status</th>
+                            <th>Reported by</th>
                             <th>Assigned</th>
                         </tr>
                     </thead>
@@ -106,6 +99,7 @@
                                 {{ mi.severity_badge(issue.severity, severities) }}</td>
                             <td>{{ mi.status_badge(issue.status) }}
                                 {% if issue.affected_count %}<span class="badge badge-light" title="Also affected">+{{ issue.affected_count }}</span>{% endif %}</td>
+                            <td>{{ issue.reporter_name }}</td>
                             <td>{{ issue.assignee_name or '' }}</td>
                         </tr>
                     {% endfor %}
@@ -116,7 +110,6 @@
     </div>
 </div>
 
-{% if is_staff %}
 <div class="modal fade" id="mi-notice-modal" tabindex="-1" role="dialog" aria-hidden="true">
     <div class="modal-dialog" role="document">
         <div class="modal-content">
@@ -159,7 +152,6 @@
         </div>
     </div>
 </div>
-{% endif %}
 
 <script>
     function miReload() {
