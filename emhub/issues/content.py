@@ -44,7 +44,7 @@ def register_content(dc):
 
     def _svc():
         if getattr(dc.app, 'issues', None) is None:
-            raise Exception('The Microscope Issues module is not enabled.')
+            raise Exception('Instrument Help is not enabled.')
         dc.check_user_access('microscope_issues')
         return dc.app.issues
 

@@ -68,7 +68,7 @@ def _request_values():
 def install(app, store):
 
     def _forbidden():
-        msg = 'This item is managed by the Microscope Issues module.'
+        msg = 'This item is managed by Instrument Help.'
         if flask.request.blueprint == 'api' or flask.request.is_json:
             return flask.jsonify({'error': msg}), 403
         flask.abort(403, msg)

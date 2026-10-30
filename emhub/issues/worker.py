@@ -104,7 +104,7 @@ class NotificationWorker:
         def _num(v, unit):
             return f'{v:.0f} {unit}' if v is not None else 'n/a'
 
-        lines = [f"Microscope Issues: week {p.get('week', '')} "
+        lines = [f"Instrument Help: week {p.get('week', '')} "
                  f"({p.get('start')} to {p.get('end')})", '',
                  f"New incidents:        {t['incidents']} (+{t['duplicates']} duplicates)",
                  f"Open now:             {t['open_now']}",
@@ -129,7 +129,7 @@ class NotificationWorker:
                 lines.append(f'  {i.ticket} {i.instrument_name}: {i.title} ({age} days)')
         base = (self.app.config.get('ISSUES_BASE_URL') or '').rstrip('/')
         lines += ['', f'Insights: {base}/main?content_id=mi_insights']
-        return f"[EMhub] Microscope Issues weekly summary {p.get('week', '')}", '\n'.join(lines)
+        return f"[EMhub] Instrument Help weekly summary {p.get('week', '')}", '\n'.join(lines)
 
     def build_reporter_email(self, msg, issue, event):
         """ Email to the reporter (or reporters of duplicates). Reporters
@@ -175,8 +175,8 @@ class NotificationWorker:
         if msg.kind == 'summary':
             return self.build_summary(msg)
         if msg.kind == 'test':
-            return ('[EMhub Microscope Issues] Test message',
-                    'This is a test message from the EMhub Microscope Issues module.\n'
+            return ('[EMhub Instrument Help] Test message',
+                    'This is a test message from EMhub Instrument Help.\n'
                     'If you received it, email notifications are working.')
         if msg.channel == 'reporter':
             return self.build_reporter_email(msg, issue, event)
@@ -226,7 +226,7 @@ class NotificationWorker:
         """ Adaptive Card wrapped as a Teams Workflows message. """
         if msg.kind == 'test':
             body = [{'type': 'TextBlock', 'weight': 'Bolder', 'size': 'Medium',
-                     'text': 'EMhub Microscope Issues: test message'},
+                     'text': 'EMhub Instrument Help: test message'},
                     {'type': 'TextBlock', 'wrap': True,
                      'text': 'Webhook notifications are working.'}]
             actions = []

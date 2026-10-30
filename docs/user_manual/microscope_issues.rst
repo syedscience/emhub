@@ -5,7 +5,7 @@ Microscope Issues
 
 The Microscope Issues module lets facility users report instrument problems
 directly from EMhub and lets the EMhub managers follow each report until the
-instrument is working again. It appears as its own **Microscope Issues** tab in
+instrument is working again. It appears as its own **Instrument Help** tab in
 the main menu: for users it opens the report form, for managers the list of
 issues.
 
@@ -15,7 +15,7 @@ The module is optional and disabled by default.
 Reporting an issue
 ------------------
 
-1. Open **Microscope Issues** (managers: click **Report an issue**), or use a link that
+1. Open **Instrument Help** (managers: click **Report an issue**), or use a link that
    preselects an instrument: ``/main?content_id=mi_report&resource_id=<id>``
    (useful for QR codes placed next to each instrument).
 2. Select the instrument, fill in the session details (detector, acquisition
@@ -72,7 +72,7 @@ Issues move through these states::
 Insights
 --------
 
-Managers open **Microscope Issues -> Insights** for a date range (default:
+Managers open **Instrument Help -> Insights** for a date range (default:
 last 90 days), optionally for one instrument:
 
 * incidents per week by urgency, open issues by age, oldest open issues;
@@ -218,7 +218,7 @@ secrets, so they are defined only on the server, never in the database:
     ISSUES_BASE_URL = 'https://emhub.example.org'   # links in emails and cards
     ISSUES_FILES = '/data/emhub-issues/files'       # default: <instance>/issue_files
 
-Admins then choose recipients in **Microscope Issues -> Settings**: facility
+Admins then choose recipients in **Instrument Help -> Settings**: facility
 emails and webhooks for every new issue, extra recipients by instrument and
 urgency, escalation contacts and acknowledgement times, and a **Queue test**
 button to check delivery.

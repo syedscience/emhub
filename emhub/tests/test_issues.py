@@ -522,7 +522,7 @@ class TestIssues(unittest.TestCase):
     def test_pages(self):
         issue = self.new_issue()
         main = self.client_for(self.reporter).get('/main?content_id=mi_report').get_data(as_text=True)
-        self.assertIn('Microscope Issues</a>', main)  # sidebar tab
+        self.assertIn('Instrument Help</a>', main)  # sidebar tab
 
         status, html = self.content(self.reporter, content_id='mi_report',
                                     resource_id=str(self.krios.resource_id),
@@ -948,7 +948,7 @@ class TestIssuesDisabled(unittest.TestCase):
         with client.session_transaction() as sess:
             sess['_user_id'] = str(user.id)
         html = client.get('/main?content_id=dashboard').get_data(as_text=True)
-        self.assertNotIn('Microscope Issues', html)
+        self.assertNotIn('Instrument Help', html)
         self.assertEqual(client.get('/api/mi/meta').status_code, 404)
 
 
