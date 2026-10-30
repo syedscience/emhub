@@ -124,6 +124,7 @@ def meta():
         'problem_areas': kb['problem_areas'],
         'severities': kb['severities'],
         'context_options': kb.get('context_options', {}),
+        'instrument_groups': kb.get('instrument_groups', []),
         'roles': sorted(roles),
         'csrf_token': csrf_token(),
     })

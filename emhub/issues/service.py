@@ -49,13 +49,19 @@ KNOWLEDGE_FILE = os.path.join(HERE, 'knowledge', 'problem_areas.json')
 
 # Map EMhub resource tags to an instrument type, first match wins.
 # Problem areas can be restricted to some types (only_types / not_types).
+# First match wins, so the more specific kinds come first
 TYPE_TAGS = [
     ('fib', {'fibsem', 'fib', 'aquilos', 'hydra', 'arctis', 'crossbeam'}),
+    ('screen', {'talosl120c', 'l120c', 'l120', 'spirit', 'tecnai', 'screening'}),
     ('tem', {'krios', 'arctica', 'talos', 'glacios', 'tem', 'tundra'}),
-    ('light', {'confocal', 'airyscan', 'lsm', 'light'}),
-    ('prep', {'vitrobot', 'prep', 'plunge', 'leica', 'negativestain',
-              'coater', 'plasma', 'hpf', 'preparation', 'solarus', 'primo',
-              'micropatterning', 'freezer'}),
+    ('light', {'confocal', 'airyscan', 'lsm', 'light', 'clem', 'thunder'}),
+    ('hpf', {'hpf', 'cryocapcell', 'pressure', 'em-ice', 'hpm'}),
+    ('plunge', {'vitrobot', 'plunge', 'gp2', 'chameleon', 'evoblot'}),
+    ('coater', {'coater', 'ace600', 'ace', 'solarus', 'plasma', 'glow',
+                'easiglow', 'sputter', 'pelco'}),
+    ('pattern', {'primo', 'micropatterning', 'patterning'}),
+    ('bench', {'negativestain', 'bench', 'stain'}),
+    ('prep', {'prep', 'leica', 'preparation', 'freezer'}),
 ]
 
 # action: (allowed current statuses, new status); managers only

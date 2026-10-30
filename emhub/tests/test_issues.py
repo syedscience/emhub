@@ -156,7 +156,7 @@ class TestIssues(unittest.TestCase):
             names = {i.name: i for i in self.svc.instruments(reportable_only=False)}
         self.assertEqual(names['Krios01'].instrument_type, 'tem')
         self.assertEqual(names['Krios01'].id, names['Krios01'].resource_id)
-        self.assertEqual(names['Vitrobot01'].instrument_type, 'prep')
+        self.assertEqual(names['Vitrobot01'].instrument_type, 'plunge')
         self.assertFalse(names['Krios02'].is_reportable)  # inactive in EMhub
 
     # ------------------------- access ----------------------------------------
@@ -181,6 +181,13 @@ class TestIssues(unittest.TestCase):
         krios = next(i for i in data['instruments'] if i['name'] == 'Krios01')
         self.assertIn('beam', krios['problem_areas'])
         self.assertNotIn('fib', krios['problem_areas'])
+        # A plunge freezer only gets the problems a plunge freezer can have
+        r = self.client_for(self.manager).get('/api/mi/meta')
+        vitrobot = next(i for i in r.get_json()['instruments'] if i['name'] == 'Vitrobot01')
+        self.assertIn('plunge_blot', vitrobot['problem_areas'])
+        for area in ('beam', 'vacuum', 'detector', 'loader', 'data', 'light_laser'):
+            self.assertNotIn(area, vitrobot['problem_areas'])
+        self.assertTrue(data['instrument_groups'])
         r = self.client_for(self.manager).get('/api/mi/meta')
         self.assertEqual(r.get_json()['roles'], ['manager', 'reporter'])
 

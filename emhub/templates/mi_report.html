@@ -8,7 +8,7 @@
             <div>
                 <p class="fac">{{ facility_name }}</p>
                 <h1>Report an instrument problem</h1>
-                <p class="sub">Four short steps. Staff are notified as soon as you send it, and safe checks
+                <p class="sub">Three quick clicks. Staff are notified as soon as you send it, and safe checks
                     for your problem appear on the right while you wait.</p>
             </div>
             {% if staff_phone %}
@@ -93,26 +93,13 @@
                         <div class="ferr" data-for="symptoms"></div>
                     </div>
 
-                    <div class="subhead">Tell staff more</div>
                     <div class="frow one">
                         <div>
-                            <label class="f" for="mi-description">Describe the problem</label>
-                            <textarea id="mi-description" name="description" maxlength="10000"
-                                      placeholder="Exact error text, the step it happened on, and anything that changed just before."></textarea>
+                            <label class="f" for="mi-description">Anything else staff should know? <span class="opt">optional</span></label>
+                            <textarea id="mi-description" name="description" maxlength="10000" rows="3"
+                                      placeholder="For example the exact error message, or what you were doing when it happened."></textarea>
                             <div class="ferr" data-for="description"></div>
-                        </div>
-                    </div>
-                    <div class="frow">
-                        <div>
-                            <label class="f" for="mi-title">Short summary <span class="opt">optional</span></label>
-                            <input type="text" id="mi-title" name="title" maxlength="200"
-                                   placeholder="Filled in for you if left empty">
                             <div class="ferr" data-for="title"></div>
-                        </div>
-                        <div>
-                            <label class="f" for="mi-tried">Already tried <span class="opt">optional</span></label>
-                            <input type="text" id="mi-tried" name="tried" maxlength="5000"
-                                   placeholder="Checks you tick on the right are added">
                         </div>
                     </div>
                     <label class="drop" id="mi-drop" for="mi-files">
@@ -131,15 +118,7 @@
                     <div class="sevs" id="mi-severities" role="radiogroup" aria-label="Urgency"></div>
                     <p class="bump" id="mi-bump" style="display: none"></p>
                     <div class="ferr" data-for="severity"></div>
-                </section>
-
-                <section class="step" id="step-contact">
-                    <div class="step-head">
-                        <span class="step-num">4</span>
-                        <div><h2>How can staff reach you?</h2>
-                            <p>Reporting as <b>{{ reporter.name }}</b>{% if reporter.pi %} · {{ reporter.pi }}{% endif %}{% if reporter.email %} · {{ reporter.email }}{% endif %}</p></div>
-                    </div>
-                    <div class="frow one" style="margin-bottom: 0">
+                    <div class="frow one" style="margin: 18px 0 0">
                         <div>
                             <label class="f" for="mi-contact">Where can staff find you? <span class="opt">optional</span></label>
                             <input type="text" id="mi-contact" name="contact" maxlength="256"
@@ -147,6 +126,7 @@
                             <div class="ferr" data-for="contact"></div>
                         </div>
                     </div>
+                    <p class="meta" style="margin: 10px 0 0">Reporting as <b>{{ reporter.name }}</b>{% if reporter.pi %} · {{ reporter.pi }}{% endif %}{% if reporter.email %} · {{ reporter.email }}{% endif %}</p>
                 </section>
 
                 <div class="actions">
@@ -191,13 +171,19 @@
     var STAFF_PHONE = {{ staff_phone|tojson }};
     var CSRF = "{{ csrf_token }}";
     var SELECTED = {{ selected_instrument_id|tojson }};
-    var TYPE_LABELS = {tem: 'Electron microscopes', fib: 'Cryo-FIB and FIB-SEM', prep: 'Sample preparation',
-                       light: 'Light microscopy', other: 'Other instruments'};
-    var TYPE_ICONS = {tem: 'fa-search-plus', fib: 'fa-bullseye', prep: 'fa-flask', light: 'fa-lightbulb', other: 'fa-cube'};
     var AREA_ICONS = {loader: 'fa-box-open', vacuum: 'fa-thermometer-half', beam: 'fa-sun', stage: 'fa-crosshairs',
                       detector: 'fa-camera', filter: 'fa-filter', software: 'fa-desktop', specimen: 'fa-snowflake',
                       quality: 'fa-chart-line', data: 'fa-hdd', emhub_data: 'fa-database',
-                      emhub_book: 'fa-calendar-alt', fib: 'fa-bullseye', other: 'fa-question'};
+                      emhub_book: 'fa-calendar-alt', fib: 'fa-bullseye', other: 'fa-question',
+                      holder: 'fa-thermometer-half', fib_transfer: 'fa-exchange-alt', fib_imaging: 'fa-image',
+                      fib_coating: 'fa-tint', fib_auto: 'fa-cogs', liftout: 'fa-syringe',
+                      plunge_humidity: 'fa-tint', plunge_blot: 'fa-sticky-note', plunge_cryogen: 'fa-snowflake',
+                      plunge_mech: 'fa-arrow-down', coat_vacuum: 'fa-compress', coat_glow: 'fa-bolt',
+                      coat_coating: 'fa-magic', hpf_ln2: 'fa-tachometer-alt', hpf_carrier: 'fa-box',
+                      pattern_uv: 'fa-sun', pattern_result: 'fa-th', pattern_sw: 'fa-desktop',
+                      light_laser: 'fa-lightbulb', light_image: 'fa-image', light_stage: 'fa-arrows-alt',
+                      light_sw: 'fa-desktop', prep_controls: 'fa-sliders-h', supplies: 'fa-boxes',
+                      bench_equipment: 'fa-flask'};
     var SEV_ICONS = {stop: 'fa-hand-paper', blocked: 'fa-ban', degraded: 'fa-exclamation-triangle', question: 'fa-comment-dots'};
     var meta = null, areasById = {}, sevById = {}, noticeRequest = 0, noticeInstruments = {};
     var sent = null;        // {ticket, at, severity} once the report is saved
@@ -224,17 +210,22 @@
 
     // ---------------- Instruments ----------------
     function renderInstruments() {
-        var box = $('#mi-inst-tiles').empty(), groups = {};
-        meta.instruments.forEach(function (i) {
-            (groups[i.instrument_type] = groups[i.instrument_type] || []).push(i);
-        });
-        ['tem', 'fib', 'prep', 'light', 'other'].forEach(function (t) {
-            if (!groups[t]) return;
-            box.append($('<div class="group-label">').text(TYPE_LABELS[t]));
+        var box = $('#mi-inst-tiles').empty(), groups = (meta.instrument_groups || []).slice();
+        var known = {};
+        groups.forEach(function (g) { g.types.forEach(function (t) { known[t] = true; }); });
+        // Types no group lists go with "other"
+        var other = groups.find(function (g) { return g.id === 'other'; });
+        if (!other) groups.push(other = {id: 'other', label: 'Other instruments', icon: 'fa-cube', types: []});
+        groups.forEach(function (g) {
+            var insts = meta.instruments.filter(function (i) {
+                return g.types.indexOf(i.instrument_type) >= 0 || (g === other && !known[i.instrument_type]);
+            });
+            if (!insts.length) return;
+            box.append($('<div class="group-label">').text(g.label));
             var tiles = $('<div class="tiles">').appendTo(box);
-            groups[t].forEach(function (i) {
+            insts.forEach(function (i) {
                 var tile = $('<button type="button" class="tile">').attr('data-id', i.id).append(
-                    $('<span class="ic">').append($('<i class="fas">').addClass(TYPE_ICONS[t])),
+                    $('<span class="ic">').append($('<i class="fas">').addClass(g.icon || 'fa-cube')),
                     $('<span>').text(i.name));
                 if (noticeInstruments[i.id]) tile.append('<span class="warn-dot" title="Service notice"></span>');
                 tiles.append(tile);
@@ -398,7 +389,6 @@
         ['#step-instrument', '#step-problem', '#step-urgency'].forEach(function (id, i) {
             $(id).toggleClass('done', items[i][2]);
         });
-        $('#step-contact').toggleClass('done', !!$('#mi-contact').val().trim());
     }
 
     // ---------------- Side: "While you wait for staff" ----------------
@@ -531,15 +521,14 @@
         $('[data-context]').each(function () {
             if ($(this).val()) context[$(this).data('context')] = $(this).val();
         });
-        var tried = $('#mi-tried').val(), checks = tickedText();
-        if (checks.length) tried = (tried ? tried + '\n' : '') + 'Checks done:\n' + checks.join('\n');
+        var checks = tickedText(), tried = checks.length ? 'Checks done:\n' + checks.join('\n') : '';
         var severity = $('input[name=severity]:checked').val() || null;
         var payload = {
             idempotency_key: idempotencyKey,
             instrument_id: parseInt($('#mi-instrument').val()) || null,
             problem_area: $('#mi-area').val(),
             symptoms: selectedSymptoms(),
-            title: $('#mi-title').val().trim() || autoTitle(),
+            title: autoTitle(),
             description: $('#mi-description').val(),
             tried: tried,
             occurred_at: ($('#mi-occurred-row').is(':visible') && $('#mi-occurred').val()) || null,

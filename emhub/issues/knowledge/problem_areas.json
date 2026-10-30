@@ -1,10 +1,16 @@
 {
  "_note": "Starting content from the St Jude prototype. Facility staff must review every entry against local SOPs before relying on it.",
  "instrument_types": {
-  "tem": "Transmission electron microscope",
+  "tem": "Cryo-TEM with autoloader",
+  "screen": "Screening TEM (side-entry)",
   "fib": "Cryo-FIB / FIB-SEM",
-  "prep": "Sample preparation",
-  "light": "Light microscopy",
+  "plunge": "Plunge freezer",
+  "coater": "Coater or glow discharger",
+  "hpf": "High-pressure freezer",
+  "pattern": "Micropatterning",
+  "light": "Light microscope",
+  "bench": "Bench or shared equipment",
+  "prep": "Other sample preparation",
   "other": "Other"
  },
  "severities": [
@@ -18,14 +24,14 @@
   {
    "id": "blocked",
    "label": "Blocked",
-   "desc": "I cannot continue collecting",
+   "desc": "I cannot continue my work",
    "rank": 2,
    "ack_minutes": 5
   },
   {
    "id": "degraded",
    "label": "Degraded",
-   "desc": "Collecting, but quality is affected",
+   "desc": "Working, but results are affected",
    "rank": 1,
    "ack_minutes": 10
   },
@@ -93,9 +99,68 @@
      "minSeverity": "stop"
     }
    ],
-   "not_types": [
-    "prep",
-    "light"
+   "only_types": [
+    "tem"
+   ]
+  },
+  {
+   "id": "holder",
+   "label": "Cryo-holder or side-entry insertion",
+   "only_types": [
+    "screen"
+   ],
+   "minSeverity": "blocked",
+   "general": [
+    "Leave the holder where it is. Do not pull it out or push it further in while the airlock is cycling.",
+    "Note the holder temperature, the holder dewar LN2 level and the vacuum reading shown."
+   ],
+   "avoid": [
+    "Do not force the holder or rotate it beyond the position your training shows.",
+    "Do not warm up or remove a cryo-holder from the column unless staff tell you to."
+   ],
+   "record": [
+    "Holder name or number",
+    "Temperature and vacuum readings",
+    "The step you were on (pre-pump, insertion, imaging, removal)"
+   ],
+   "symptoms": [
+    {
+     "id": "airlock",
+     "label": "Airlock will not pump or holder will not go in",
+     "steps": [
+      "Check the holder is seated straight in the airlock and the O-ring looks clean and undamaged.",
+      "Wait for the full pre-pump time shown on screen before turning the holder.",
+      "If the pre-pump does not finish after two attempts, leave the holder in the airlock position and call staff."
+     ]
+    },
+    {
+     "id": "warm",
+     "label": "Holder temperature is rising",
+     "minSeverity": "stop",
+     "steps": [
+      "Check the holder dewar still has LN2. Top it up only if your training covers it.",
+      "Close the column valves to protect the specimen and the column.",
+      "Call staff now if the temperature keeps rising."
+     ]
+    },
+    {
+     "id": "vib",
+     "label": "Image vibrates or drifts with the holder in",
+     "steps": [
+      "Check nothing is touching the holder dewar or its cable, and the LN2 is not boiling hard after a top-up.",
+      "Wait five to ten minutes after a top-up for the holder to settle, then check drift again.",
+      "If drift stays high, note the values for staff."
+     ]
+    },
+    {
+     "id": "vacdrop",
+     "label": "Column vacuum dropped after insertion",
+     "minSeverity": "stop",
+     "steps": [
+      "Close the column valves if they are not already closed.",
+      "Do not remove the holder. Call staff now."
+     ]
+    }
    ]
   },
   {
@@ -126,6 +191,11 @@
      "id": "temp",
      "label": "Cryo temperature out of range"
     }
+   ],
+   "only_types": [
+    "tem",
+    "screen",
+    "fib"
    ]
   },
   {
@@ -179,10 +249,9 @@
      ]
     }
    ],
-   "not_types": [
-    "fib",
-    "prep",
-    "light"
+   "only_types": [
+    "tem",
+    "screen"
    ]
   },
   {
@@ -227,6 +296,10 @@
       "Check the autofocus tolerance and defocus range in your protocol. Very tight tolerances can cause repeated retries.",
       "Check that eucentric height was set at this position, since a wrong height often shows up as failing autofocus.",
       "If the focus value sits at the limit of the lens range, stop and call staff."
+     ],
+     "only_types": [
+      "tem",
+      "screen"
      ]
     },
     {
@@ -238,12 +311,16 @@
       "Check that the pretilt setting matches the lamella or grid orientation as loaded.",
       "If it fails at similar angles at different positions, increase the tracking exposure within your dose budget.",
       "If the stage itself errors at high tilt, stop and call staff."
+     ],
+     "only_types": [
+      "tem"
      ]
     }
    ],
-   "not_types": [
-    "prep",
-    "light"
+   "only_types": [
+    "tem",
+    "screen",
+    "fib"
    ]
   },
   {
@@ -276,6 +353,9 @@
       "Acquire a no-specimen exposure and look for streaks, lines or fixed patterns.",
       "Acquire a second exposure. A pattern that repeats points to the detector or reference. A pattern that changes points to the specimen or beam.",
       "If the pattern repeats, ask staff whether a new gain reference is due."
+     ],
+     "only_types": [
+      "tem"
      ]
     },
     {
@@ -289,10 +369,9 @@
      ]
     }
    ],
-   "not_types": [
-    "fib",
-    "prep",
-    "light"
+   "only_types": [
+    "tem",
+    "screen"
    ]
   },
   {
@@ -329,10 +408,8 @@
      ]
     }
    ],
-   "not_types": [
-    "fib",
-    "prep",
-    "light"
+   "only_types": [
+    "tem"
    ]
   },
   {
@@ -365,6 +442,9 @@
       "Check that hole size and spacing in the template match the grid in use.",
       "Check ice-thickness or contrast filter thresholds. If they are too strict, most holes are rejected.",
       "Test on a few holes manually before restarting the run."
+     ],
+     "only_types": [
+      "tem"
      ]
     },
     {
@@ -378,9 +458,9 @@
      ]
     }
    ],
-   "not_types": [
-    "prep",
-    "light"
+   "only_types": [
+    "tem",
+    "screen"
    ]
   },
   {
@@ -436,6 +516,10 @@
       "If squares broke after loading, record the grid slot and tell staff in case it happened during transfer."
      ]
     }
+   ],
+   "only_types": [
+    "tem",
+    "screen"
    ]
   },
   {
@@ -470,10 +554,992 @@
      ]
     }
    ],
-   "not_types": [
-    "fib",
+   "only_types": [
+    "tem"
+   ]
+  },
+  {
+   "id": "fib_transfer",
+   "label": "Shuttle, autoloader or sample transfer",
+   "only_types": [
+    "fib"
+   ],
+   "minSeverity": "blocked",
+   "staffOnly": true,
+   "hold": [
+    "Stop. Do not repeat the transfer, docking or loading step.",
+    "Leave the shuttle, rod and chamber in their current state.",
+    "Keep the loading station topped up with LN2 if you are trained to, so samples stay cold."
+   ],
+   "record": [
+    "The exact step and error message",
+    "Which shuttle position or cassette slot",
+    "A photo of the screen and the loading station"
+   ],
+   "symptoms": [
+    {
+     "id": "xfer",
+     "label": "Shuttle or transfer rod stuck",
+     "minSeverity": "stop"
+    },
+    {
+     "id": "dock",
+     "label": "Autoloader or cassette will not dock (Arctis)"
+    },
+    {
+     "id": "station",
+     "label": "Loading station LN2 or frost problem"
+    },
+    {
+     "id": "clip",
+     "label": "Grid fell out or clip ring damaged",
+     "minSeverity": "stop"
+    }
+   ]
+  },
+  {
+   "id": "fib",
+   "label": "Lamella milling",
+   "general": [
+    "Pause milling and do not start the next step until the problem is clear.",
+    "Save the current positions and record the milling step, current and pattern you were on."
+   ],
+   "avoid": [
+    "Do not change beam currents or retract the stage while a lamella is at risk without asking staff."
+   ],
+   "symptoms": [
+    {
+     "id": "crack",
+     "label": "Lamella cracks or breaks",
+     "steps": [
+      "Pause milling. Note the step (rough milling, fine milling, polishing) and angle when the damage appeared.",
+      "Image the lamella and surrounding area, and save the image with the position.",
+      "Check whether other lamellae on the grid show the same pattern. If so, the cause may be grid-wide (ice thickness, grid mounting) rather than the milling.",
+      "Tell staff before starting more lamellae with the same parameters."
+     ]
+    },
+    {
+     "id": "thk",
+     "label": "Lamella thickness not as expected",
+     "steps": [
+      "Record your current thickness estimate and the method you used.",
+      "Check milling currents, pattern sizes and milling angle against your protocol.",
+      "Check for redeposition or ice contamination on the surface.",
+      "Change one parameter at a time and tell staff what you changed."
+     ]
+    },
+    {
+     "id": "cont",
+     "label": "Ice contamination on the lamella",
+     "steps": [
+      "Note when the contamination appeared relative to milling and imaging.",
+      "Compare with another lamella on the same grid and with other grids from this session.",
+      "If contamination builds on every sample, ask staff to check the chamber and cold trap."
+     ]
+    }
+   ],
+   "only_types": [
+    "fib"
+   ]
+  },
+  {
+   "id": "fib_imaging",
+   "label": "SEM or ion-beam imaging",
+   "only_types": [
+    "fib"
+   ],
+   "general": [
+    "Save an image of the problem with the beam settings in the data bar.",
+    "Check whether the problem is on every grid and position or only this one."
+   ],
+   "avoid": [
+    "Do not change source, gun or plasma-gas settings unless you are trained for them."
+   ],
+   "symptoms": [
+    {
+     "id": "charge",
+     "label": "Charging, drift or unstable imaging",
+     "steps": [
+      "Check that the sample has the conductive (sputter or GIS) layer your protocol calls for.",
+      "Compare image stability at a lower voltage or current.",
+      "If drift is at every position, ask staff to check shuttle and clip seating."
+     ]
+    },
+    {
+     "id": "nobeam",
+     "label": "No SEM or ion-beam image",
+     "steps": [
+      "Check that the beam is on, unblanked and the correct detector is selected.",
+      "Check the chamber vacuum is ready and the stage is not at a blocked position.",
+      "If the beam still does not appear, stop and call staff."
+     ]
+    },
+    {
+     "id": "current",
+     "label": "Ion beam current wrong or drifting (plasma FIB)",
+     "steps": [
+      "Measure the current in the Faraday cup if your training covers it, and note the value.",
+      "Compare with the value for this aperture in your protocol.",
+      "Pause milling until staff confirm the current. Wrong currents can destroy lamellae."
+     ]
+    },
+    {
+     "id": "coinc",
+     "label": "SEM and FIB images do not line up (coincidence)",
+     "steps": [
+      "Re-check eucentric height on a clear feature.",
+      "Set the coincidence point again following your SOP.",
+      "If it will not hold, note the stage position and call staff."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "fib_coating",
+   "label": "GIS or sputter coating",
+   "only_types": [
+    "fib"
+   ],
+   "general": [
+    "Note which coating step failed and the settings used (time, temperature, current)."
+   ],
+   "avoid": [
+    "Do not repeat a deposition more than once. Thick layers can ruin the lamella site."
+   ],
+   "symptoms": [
+    {
+     "id": "gis",
+     "label": "No platinum (GIS) layer deposited",
+     "steps": [
+      "Image the surface to see whether any layer was deposited.",
+      "Check the GIS needle inserted and the heater reached temperature.",
+      "Ask staff to check the GIS before continuing."
+     ]
+    },
+    {
+     "id": "sputter",
+     "label": "Sputter coating fails or is uneven",
+     "steps": [
+      "Note the sputter current and time you used.",
+      "Check the shuttle was in the sputter position.",
+      "Ask staff before coating again."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "fib_auto",
+   "label": "Automation software (AutoTEM, Maps, WebUI)",
+   "only_types": [
+    "fib"
+   ],
+   "general": [
+    "Take a screenshot of the error and note the time and the site name.",
+    "Save the current sites and positions before trying anything else."
+   ],
+   "avoid": [
+    "Do not delete sites or projects to clear an error."
+   ],
+   "symptoms": [
+    {
+     "id": "stall",
+     "label": "Automated milling stalls or skips sites",
+     "steps": [
+      "Check which step the queue stopped on and whether that site was marked as failed.",
+      "Pause the queue rather than stopping it, so the remaining sites keep their state.",
+      "Report the step and the site to staff."
+     ]
+    },
+    {
+     "id": "align",
+     "label": "Image recognition or alignment fails",
+     "steps": [
+      "Check the reference image is sharp and taken at the right magnification.",
+      "Retake the reference image once, then retry the site.",
+      "If it fails on every site, ask staff."
+     ]
+    },
+    {
+     "id": "crash",
+     "label": "Software crashed or will not connect to the microscope",
+     "steps": [
+      "Do not restart the microscope server.",
+      "Note whether the microscope user interface still responds.",
+      "Call staff to restart the software safely."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "liftout",
+   "label": "Lift-out or micromanipulator needle",
+   "only_types": [
+    "fib"
+   ],
+   "general": [
+    "Retract the needle to its park position only if your training covers it."
+   ],
+   "avoid": [
+    "Do not drive the needle near the sample while it is not tracking correctly."
+   ],
+   "symptoms": [
+    {
+     "id": "bent",
+     "label": "Needle bent, broken or contaminated",
+     "steps": [
+      "Image the needle tip and save the image.",
+      "Retract the needle and tell staff before another lift-out."
+     ]
+    },
+    {
+     "id": "attach",
+     "label": "Chunk will not attach or release",
+     "steps": [
+      "Note the attach method (redeposition, GIS, cryo-condensation) and the step.",
+      "Try once more following your SOP, then ask staff."
+     ]
+    },
+    {
+     "id": "drive",
+     "label": "Needle will not move or moves the wrong way",
+     "steps": [
+      "Stop moving the needle.",
+      "Call staff to check the manipulator."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "plunge_humidity",
+   "label": "Humidity or chamber temperature",
+   "only_types": [
+    "plunge"
+   ],
+   "general": [
+    "Note the humidity and temperature set points and the values shown now.",
+    "Check the humidifier water container is filled with the water your SOP says (usually distilled)."
+   ],
+   "avoid": [
+    "Do not open the humidifier or chamber electronics."
+   ],
+   "symptoms": [
+    {
+     "id": "hum_low",
+     "label": "Humidity will not reach the set point",
+     "steps": [
+      "Refill the humidifier water if it is low.",
+      "Close the chamber door fully and wait five minutes.",
+      "Check the humidifier is switched on in the settings.",
+      "If it is still low, keep the instrument on and call staff."
+     ]
+    },
+    {
+     "id": "cond",
+     "label": "Water dripping or condensation in the chamber",
+     "steps": [
+      "Lower the humidity to 90% and wait for it to settle.",
+      "Dry visible water with lint-free tissue if it is safe to reach.",
+      "Tell staff if water keeps collecting."
+     ]
+    },
+    {
+     "id": "temp",
+     "label": "Chamber temperature wrong",
+     "steps": [
+      "Compare the set point and the reading.",
+      "Allow 15 minutes after start-up for the temperature to settle.",
+      "Report the readings to staff if it does not settle."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "plunge_blot",
+   "label": "Blotting or ice thickness",
+   "only_types": [
+    "plunge"
+   ],
+   "general": [
+    "Note blot force, blot time, wait time and the filter paper you used.",
+    "Change one setting at a time and make a test grid."
+   ],
+   "symptoms": [
+    {
+     "id": "pads",
+     "label": "Blot pads not touching or uneven",
+     "steps": [
+      "Check the filter paper is mounted flat and fully clipped on both pads.",
+      "Replace filter paper that is wet, torn or creased.",
+      "If the pads still do not close evenly, ask staff to check the blot arms."
+     ]
+    },
+    {
+     "id": "paper",
+     "label": "Filter paper tears or falls off",
+     "steps": [
+      "Use fresh filter paper of the type your SOP lists.",
+      "Make sure the paper is punched to fit the pads.",
+      "Tell staff if the clips or rings are loose."
+     ]
+    },
+    {
+     "id": "ice",
+     "label": "Ice too thick, too thin or uneven",
+     "steps": [
+      "Too thick: increase blot time or force by one step. Too thin or empty: decrease it.",
+      "Check the humidity was at the set point when you blotted.",
+      "Check your sample volume and glow-discharge time.",
+      "Keep notes of the settings that worked for your lab."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "plunge_cryogen",
+   "label": "Ethane, LN2 or cryogen container",
+   "only_types": [
+    "plunge"
+   ],
+   "minSeverity": "degraded",
+   "general": [
+    "Work in the ventilated area and keep ignition sources away from ethane.",
+    "Wear the eye and hand protection your SOP requires."
+   ],
+   "avoid": [
+    "Do not leave a condensing ethane line unattended.",
+    "Do not add ethane to warm containers or pour LN2 into the ethane cup."
+   ],
+   "symptoms": [
+    {
+     "id": "nocond",
+     "label": "Ethane will not condense",
+     "steps": [
+      "Check the outer container is full of LN2 and has cooled for at least five minutes.",
+      "Check the ethane cylinder valve is open and the regulator shows pressure.",
+      "If the cylinder is empty, close it and tell staff."
+     ]
+    },
+    {
+     "id": "solid",
+     "label": "Ethane froze solid",
+     "steps": [
+      "Lift the ethane cup slightly above the LN2, or wait for the warmer to work, so it melts.",
+      "Do not plunge into solid or slushy ethane."
+     ]
+    },
+    {
+     "id": "leak",
+     "label": "Smell of gas or a leaking line",
+     "minSeverity": "stop",
+     "steps": [
+      "Close the ethane cylinder valve if it is safe to do so.",
+      "Move away, keep sparks and flames away, and call staff now."
+     ]
+    },
+    {
+     "id": "ln2",
+     "label": "LN2 boils off too fast or no LN2 available",
+     "steps": [
+      "Check the container lid and foam are in place.",
+      "Check the facility LN2 dewar level and tell staff if it is low."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "plunge_mech",
+   "label": "Tweezers, plunger or grid handling",
+   "only_types": [
+    "plunge"
+   ],
+   "general": [
+    "Note the step where it went wrong (mounting, blotting, plunging, transfer to the grid box)."
+   ],
+   "avoid": [
+    "Do not put fingers under the plunger while it is armed."
+   ],
+   "symptoms": [
+    {
+     "id": "tweez",
+     "label": "Tweezers will not lock or hold the grid",
+     "steps": [
+      "Check you are using the tweezers made for this instrument.",
+      "Check the tweezer tips are straight and close evenly.",
+      "Tell staff if the tweezer mount is loose."
+     ]
+    },
+    {
+     "id": "noplunge",
+     "label": "Plunger does not fire or stops halfway",
+     "steps": [
+      "Check the chamber door is closed and the cryogen container is in position.",
+      "Restart the plunge sequence once from the start screen.",
+      "If it fails again, leave the instrument and call staff."
+     ]
+    },
+    {
+     "id": "bent",
+     "label": "Grids bent or lost during transfer",
+     "steps": [
+      "Pre-cool tweezers before touching the grid in the ethane.",
+      "Check the grid box and holder are under LN2 and in the right position.",
+      "Tell staff if grids bend on every plunge."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "coat_vacuum",
+   "label": "Chamber will not pump down or vent",
+   "only_types": [
+    "coater"
+   ],
+   "general": [
+    "Check the chamber lid or door is seated and the O-ring is clean.",
+    "Note the pressure shown and how long you waited."
+   ],
+   "avoid": [
+    "Do not force the lid open while the chamber is under vacuum."
+   ],
+   "symptoms": [
+    {
+     "id": "slow",
+     "label": "Pump-down is slow or never reaches the set point",
+     "steps": [
+      "Vent, wipe the O-ring with lint-free tissue, reseat the lid and pump again.",
+      "Remove anything wet or outgassing (tape, damp filter paper) from the chamber.",
+      "If it still does not pump down, tell staff."
+     ]
+    },
+    {
+     "id": "novent",
+     "label": "Chamber will not vent",
+     "steps": [
+      "Check the vent gas supply is on, if your instrument uses one.",
+      "Wait two minutes and try venting again from the controls.",
+      "Call staff if the lid stays locked."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "coat_glow",
+   "label": "Glow discharge or plasma cleaning",
+   "only_types": [
+    "coater"
+   ],
+   "general": [
+    "Note gas, current or power, and time used."
+   ],
+   "symptoms": [
+    {
+     "id": "noglow",
+     "label": "No glow, or glow flickers",
+     "steps": [
+      "Check the chamber reached the required vacuum before starting.",
+      "Check the gas supply (air, argon, oxygen or hydrogen) is open and not empty.",
+      "Try once more. If there is still no glow, tell staff."
+     ]
+    },
+    {
+     "id": "hydro",
+     "label": "Grids not hydrophilic after treatment",
+     "steps": [
+      "Test with a drop of water on a treated grid. It should spread flat.",
+      "Use grids within 30 minutes of treatment.",
+      "Increase time or power one step, then tell staff if it still fails."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "coat_coating",
+   "label": "Carbon or metal coating",
+   "only_types": [
+    "coater"
+   ],
+   "general": [
+    "Note the coating mode, target thickness and the thickness reading at the end."
+   ],
+   "avoid": [
+    "Do not touch the carbon rod, thread or target while it is hot."
+   ],
+   "symptoms": [
+    {
+     "id": "nocoat",
+     "label": "No coating, or the carbon thread breaks",
+     "steps": [
+      "Check a carbon thread or rod is fitted and has not run out.",
+      "Replace the thread if you are trained, following the SOP.",
+      "Tell staff if the source does not heat."
+     ]
+    },
+    {
+     "id": "thick",
+     "label": "Thickness reading looks wrong",
+     "steps": [
+      "Check the quartz-crystal monitor is not at the end of its life (shown on the controls).",
+      "Compare with a test coat on a slide or grid.",
+      "Tell staff the reading and what you expected."
+     ]
+    },
+    {
+     "id": "uneven",
+     "label": "Coating uneven or flaking",
+     "steps": [
+      "Check the sample stage was rotating or tilting as set.",
+      "Check the sample was clean and dry before coating.",
+      "Tell staff if the problem repeats."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "hpf_ln2",
+   "label": "LN2 supply or freezing pressure",
+   "only_types": [
+    "hpf"
+   ],
+   "minSeverity": "blocked",
+   "staffOnly": true,
+   "hold": [
+    "Stop freezing. Leave the instrument powered on.",
+    "Do not open covers or the LN2 supply line."
+   ],
+   "record": [
+    "Error message and the time",
+    "Pressure and temperature shown",
+    "How many shots you had done"
+   ],
+   "symptoms": [
+    {
+     "id": "pressure",
+     "label": "Freezing pressure not reached"
+    },
+    {
+     "id": "ln2",
+     "label": "LN2 level or supply alarm"
+    },
+    {
+     "id": "leak",
+     "label": "LN2 or pressure leak",
+     "minSeverity": "stop"
+    }
+   ]
+  },
+  {
+   "id": "hpf_carrier",
+   "label": "Sample carriers or loading",
+   "only_types": [
+    "hpf"
+   ],
+   "general": [
+    "Note the carrier type and size, and the filler you used."
+   ],
+   "avoid": [
+    "Do not use tools to force a carrier in or out."
+   ],
+   "symptoms": [
+    {
+     "id": "jam",
+     "label": "Carrier or cartridge jammed",
+     "steps": [
+      "Stop and do not run the instrument again.",
+      "Call staff to free the cartridge."
+     ]
+    },
+    {
+     "id": "lost",
+     "label": "Sample lost or carrier empty after freezing",
+     "steps": [
+      "Check the carriers are closed correctly and the sample fills the cavity.",
+      "Check the filler (hexadecene, BSA, yeast paste) matches your protocol.",
+      "Tell staff if carriers open during every shot."
+     ]
+    },
+    {
+     "id": "quality",
+     "label": "Poor freezing (ice crystals) in the sample",
+     "steps": [
+      "Check the sample thickness is within the carrier depth.",
+      "Check the time between loading and freezing was short.",
+      "Share the pressure and cooling curves with staff, if the instrument shows them."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "pattern_uv",
+   "label": "UV light or pattern projection",
+   "only_types": [
+    "pattern"
+   ],
+   "general": [
+    "Note the objective, UV dose and the pattern used."
+   ],
+   "avoid": [
+    "Do not look into the light path or remove covers."
+   ],
+   "symptoms": [
+    {
+     "id": "nouv",
+     "label": "No UV light or the light source will not start",
+     "steps": [
+      "Check the light source is switched on and has warmed up.",
+      "Check the shutter and the light path settings on the microscope.",
+      "Tell staff if it still does not start."
+     ]
+    },
+    {
+     "id": "focus",
+     "label": "Pattern out of focus or in the wrong place",
+     "steps": [
+      "Focus on the grid surface with the same objective you will pattern with.",
+      "Re-run the calibration in the software if your training covers it.",
+      "Tell staff if the offset stays."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "pattern_result",
+   "label": "Patterning result (PLPP, protein binding)",
+   "only_types": [
+    "pattern"
+   ],
+   "general": [
+    "Note the PLPP batch, the dose and the incubation times used."
+   ],
+   "symptoms": [
+    {
+     "id": "weak",
+     "label": "Patterns faint or missing",
+     "steps": [
+      "Check the PLPP is within its use-by date and was kept dark.",
+      "Increase the dose one step on a test grid.",
+      "Tell staff the settings if it still fails."
+     ]
+    },
+    {
+     "id": "cells",
+     "label": "Cells or protein not sticking to the pattern",
+     "steps": [
+      "Check the passivation and protein coating steps followed your protocol.",
+      "Check the grids did not dry out between steps."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "pattern_sw",
+   "label": "Patterning software (Leonardo)",
+   "only_types": [
+    "pattern"
+   ],
+   "general": [
+    "Take a screenshot of the error and note the time."
+   ],
+   "symptoms": [
+    {
+     "id": "crash",
+     "label": "Software crashes or will not see the microscope",
+     "steps": [
+      "Save your pattern files.",
+      "Close and restart the software once.",
+      "Tell staff if the microscope still is not found."
+     ]
+    },
+    {
+     "id": "licence",
+     "label": "Licence or login error",
+     "steps": [
+      "Note the exact message and tell staff."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "light_laser",
+   "label": "Lasers or light source",
+   "only_types": [
+    "light"
+   ],
+   "general": [
+    "Note which laser lines and channels you use."
+   ],
+   "avoid": [
+    "Do not open laser covers or bypass interlocks."
+   ],
+   "symptoms": [
+    {
+     "id": "nolaser",
+     "label": "Laser will not switch on",
+     "steps": [
+      "Check the laser power switch and key are on, in the order your SOP gives.",
+      "Check the laser is enabled in the software and has warmed up.",
+      "Tell staff which laser line is affected."
+     ]
+    },
+    {
+     "id": "weak",
+     "label": "Weak or no signal",
+     "steps": [
+      "Check the correct objective, filters and detector are selected.",
+      "Check the laser power and gain against a sample that worked before.",
+      "Tell staff if a standard slide also gives weak signal."
+     ]
+    },
+    {
+     "id": "lamp",
+     "label": "Transmitted or fluorescence lamp not working",
+     "steps": [
+      "Check the lamp is switched on and the shutter is open.",
+      "Tell staff if the lamp does not light."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "light_image",
+   "label": "Image quality, focus or Airyscan processing",
+   "only_types": [
+    "light"
+   ],
+   "general": [
+    "Save an example image with its settings."
+   ],
+   "symptoms": [
+    {
+     "id": "blur",
+     "label": "Image blurry or will not focus",
+     "steps": [
+      "Clean the objective and use the right immersion medium.",
+      "Check the correction collar matches your coverslip, if the objective has one.",
+      "Check the sample is flat and the slide is the right way up."
+     ]
+    },
+    {
+     "id": "airyscan",
+     "label": "Airyscan processing fails or looks wrong",
+     "steps": [
+      "Check the detector was aligned during acquisition (the hexagon view).",
+      "Process again with the default strength setting.",
+      "Tell staff the file name."
+     ]
+    },
+    {
+     "id": "bleach",
+     "label": "Sample bleaches very fast",
+     "steps": [
+      "Lower the laser power and increase gain.",
+      "Reduce the pixel dwell time or number of averages."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "light_stage",
+   "label": "Stage, objectives or incubation",
+   "only_types": [
+    "light"
+   ],
+   "general": [
+    "Note the objective and stage position."
+   ],
+   "avoid": [
+    "Do not drive an oil objective across a dry sample, or the reverse."
+   ],
+   "symptoms": [
+    {
+     "id": "stage",
+     "label": "Stage will not move or is not calibrated",
+     "steps": [
+      "Check nothing is blocking the stage or insert.",
+      "Calibrate the stage from the software if your training covers it.",
+      "Tell staff if it still will not move."
+     ]
+    },
+    {
+     "id": "objective",
+     "label": "Objective damaged, dirty or will not change",
+     "steps": [
+      "Do not try to remove the objective.",
+      "Tell staff which objective position is affected."
+     ]
+    },
+    {
+     "id": "incub",
+     "label": "Incubation or cryo-stage temperature or CO2 wrong",
+     "steps": [
+      "Compare the set point and the reading.",
+      "Allow the time your SOP gives for the chamber to settle.",
+      "Tell staff if it does not settle."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "light_sw",
+   "label": "ZEN software or computer",
+   "only_types": [
+    "light"
+   ],
+   "general": [
+    "Save your data and take a screenshot of the error."
+   ],
+   "avoid": [
+    "Do not switch off hardware while the software is still running."
+   ],
+   "symptoms": [
+    {
+     "id": "crash",
+     "label": "Software crashed or froze",
+     "steps": [
+      "Close the software, then restart it once, following the start-up order in your SOP.",
+      "Tell staff if it crashes again."
+     ]
+    },
+    {
+     "id": "hw",
+     "label": "Software does not find the microscope hardware",
+     "steps": [
+      "Close the software, check the hardware is switched on in the right order, then restart.",
+      "Tell staff which component is missing."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "prep_controls",
+   "label": "Controls, display or error message",
+   "only_types": [
+    "plunge",
+    "coater",
+    "hpf",
+    "pattern",
+    "bench",
+    "prep"
+   ],
+   "general": [
+    "Take a photo of the screen or error message and note the time.",
+    "Note what you pressed just before the error."
+   ],
+   "avoid": [
+    "Do not change instrument settings or calibrations you were not trained on."
+   ],
+   "symptoms": [
+    {
+     "id": "error",
+     "label": "Error message on the screen",
+     "steps": [
+      "Read the message and follow it only if it gives a simple user action (close door, refill water).",
+      "Otherwise leave the instrument as it is and tell staff."
+     ]
+    },
+    {
+     "id": "nostart",
+     "label": "Instrument will not switch on or start",
+     "steps": [
+      "Check the power switch and the socket.",
+      "Check any emergency stop or door interlock is released.",
+      "Tell staff if it still will not start."
+     ]
+    },
+    {
+     "id": "frozen",
+     "label": "Screen frozen or not responding",
+     "steps": [
+      "Wait one minute.",
+      "Restart the instrument once if your SOP allows it.",
+      "Tell staff if it freezes again."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "bench_equipment",
+   "label": "Bench equipment (pipettes, centrifuge, fume hood)",
+   "only_types": [
+    "bench",
+    "prep"
+   ],
+   "general": [
+    "Note the equipment name and what went wrong."
+   ],
+   "avoid": [
+    "Do not use a fume hood whose airflow alarm is sounding."
+   ],
+   "symptoms": [
+    {
+     "id": "broken",
+     "label": "Equipment broken or not working",
+     "steps": [
+      "Label it \"Do not use\" and tell staff."
+     ]
+    },
+    {
+     "id": "dirty",
+     "label": "Bench left dirty or contaminated",
+     "steps": [
+      "Do not clean up unknown spills. Tell staff what you see."
+     ]
+    },
+    {
+     "id": "hood",
+     "label": "Fume hood airflow alarm",
+     "minSeverity": "blocked",
+     "steps": [
+      "Close any open containers, lower the sash and step away.",
+      "Tell staff now."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "supplies",
+   "label": "Supplies or consumables running out",
+   "only_types": [
+    "plunge",
+    "coater",
+    "hpf",
+    "pattern",
+    "bench",
     "prep",
     "light"
+   ],
+   "general": [
+    "Check the spare supplies shelf or cabinet listed in your SOP.",
+    "Note what is missing and roughly how much is left."
+   ],
+   "symptoms": [
+    {
+     "id": "grids",
+     "label": "Grids, filter paper or tweezers",
+     "steps": [
+      "Tell staff what is missing. Use another lab grid box only with permission."
+     ]
+    },
+    {
+     "id": "gas",
+     "label": "Gas cylinder, ethane or LN2 low",
+     "steps": [
+      "Close the cylinder valve if it is empty, and tell staff."
+     ]
+    },
+    {
+     "id": "reagent",
+     "label": "Stain, reagent or water",
+     "steps": [
+      "Note the reagent and the lot number, and tell staff."
+     ]
+    },
+    {
+     "id": "ppe",
+     "label": "Gloves, eye protection or other safety items",
+     "steps": [
+      "Do not work without the protection your SOP requires."
+     ]
+    }
    ]
   },
   {
@@ -510,6 +1576,12 @@
       "Report the time of the first failure, since it helps staff correlate it with system events."
      ]
     }
+   ],
+   "only_types": [
+    "tem",
+    "screen",
+    "fib",
+    "light"
    ]
   },
   {
@@ -562,6 +1634,11 @@
       "Note the exact error text and the project name, and send both to staff."
      ]
     }
+   ],
+   "only_types": [
+    "tem",
+    "screen",
+    "fib"
    ]
   },
   {
@@ -624,82 +1701,6 @@
    ]
   },
   {
-   "id": "fib",
-   "label": "Cryo-FIB or lamella milling",
-   "general": [
-    "Pause milling and do not start the next step until the problem is clear.",
-    "Save the current positions and record the milling step, current and pattern you were on."
-   ],
-   "avoid": [
-    "Do not change beam currents or retract the stage while a lamella is at risk without asking staff."
-   ],
-   "symptoms": [
-    {
-     "id": "crack",
-     "label": "Lamella cracks or breaks",
-     "steps": [
-      "Pause milling. Note the step (rough milling, fine milling, polishing) and angle when the damage appeared.",
-      "Image the lamella and surrounding area, and save the image with the position.",
-      "Check whether other lamellae on the grid show the same pattern. If so, the cause may be grid-wide (ice thickness, grid mounting) rather than the milling.",
-      "Tell staff before starting more lamellae with the same parameters."
-     ]
-    },
-    {
-     "id": "charge",
-     "label": "Charging, drift or unstable SEM or FIB imaging",
-     "steps": [
-      "Check that the sample has the conductive layer your protocol calls for.",
-      "Compare image stability at lower voltage or current for imaging.",
-      "Check whether drift is on all grids or only this one.",
-      "If drift is at every position, ask staff to check shuttle and clip seating."
-     ]
-    },
-    {
-     "id": "gis",
-     "label": "Platinum or GIS coating problem",
-     "steps": [
-      "Note which step failed: no deposit seen, or an issue with time or temperature.",
-      "Do not repeat the deposition more than once.",
-      "Image the surface to see whether any layer was deposited.",
-      "Ask staff to check the GIS before continuing."
-     ]
-    },
-    {
-     "id": "thk",
-     "label": "Lamella thickness not as expected",
-     "steps": [
-      "Record your current thickness estimate and the method you used.",
-      "Check milling currents, pattern sizes and milling angle against your protocol.",
-      "Check for redeposition or ice contamination on the surface.",
-      "Change one parameter at a time and tell staff what you changed."
-     ]
-    },
-    {
-     "id": "cont",
-     "label": "Ice contamination on the lamella",
-     "steps": [
-      "Note when the contamination appeared relative to milling and imaging.",
-      "Compare with another lamella on the same grid and with other grids from this session.",
-      "If contamination builds on every sample, ask staff to check the chamber and cold trap."
-     ]
-    },
-    {
-     "id": "xfer",
-     "label": "Shuttle or transfer problem",
-     "minSeverity": "stop",
-     "steps": [
-      "Stop. Do not repeat the transfer step.",
-      "Leave the shuttle and chamber in their current state.",
-      "Call staff now."
-     ]
-    }
-   ],
-   "only_types": [
-    "fib",
-    "other"
-   ]
-  },
-  {
    "id": "other",
    "label": "Something else or not sure",
    "general": [
@@ -718,17 +1719,11 @@
     "Ceta camera",
     "Other or not sure"
    ],
-   "fib": [
-    "Not applicable"
-   ],
-   "prep": [
-    "Not applicable"
-   ],
-   "light": [
-    "Not applicable"
+   "screen": [
+    "Ceta camera",
+    "Other or not sure"
    ],
    "other": [
-    "Other or not sure",
     "Not applicable"
    ]
   },
@@ -740,14 +1735,21 @@
     "Velox",
     "Other"
    ],
+   "screen": [
+    "TIA or Velox",
+    "EPU",
+    "SerialEM",
+    "Other"
+   ],
    "fib": [
     "AutoTEM",
     "Maps",
     "xT (microscope UI)",
+    "WebUI (Arctis)",
     "Other"
    ],
-   "prep": [
-    "Not applicable",
+   "pattern": [
+    "Leonardo",
     "Other"
    ],
    "light": [
@@ -755,7 +1757,7 @@
     "Other"
    ],
    "other": [
-    "Other"
+    "Not applicable"
    ]
   },
   "session_type": {
@@ -766,22 +1768,48 @@
     "Alignment or setup",
     "Other"
    ],
+   "screen": [
+    "Grid screening",
+    "Negative stain",
+    "Training",
+    "Other"
+   ],
    "fib": [
     "Cryo-FIB milling",
     "Lift-out",
     "Screening",
     "Other"
    ],
-   "prep": [
-    "Grid preparation",
+   "plunge": [
+    "Making cryo-EM grids",
+    "Optimising blotting",
+    "Training",
+    "Other"
+   ],
+   "coater": [
+    "Glow discharge or plasma clean",
+    "Carbon coating",
+    "Metal sputter coating",
+    "Other"
+   ],
+   "hpf": [
+    "High-pressure freezing",
+    "Training",
+    "Other"
+   ],
+   "pattern": [
+    "Micropatterning grids",
+    "Training",
     "Other"
    ],
    "light": [
     "Imaging",
+    "Cryo-CLEM",
+    "Training",
     "Other"
    ],
    "other": [
-    "Other"
+    "Not applicable"
    ]
   },
   "session_status": [
@@ -797,5 +1825,53 @@
    "More than an hour ago",
    "Comes and goes"
   ]
- }
+ },
+ "instrument_groups": [
+  {
+   "id": "em",
+   "label": "Electron microscopes",
+   "icon": "fa-search-plus",
+   "types": [
+    "tem",
+    "screen"
+   ]
+  },
+  {
+   "id": "fib",
+   "label": "Cryo-FIB and FIB-SEM",
+   "icon": "fa-bullseye",
+   "types": [
+    "fib"
+   ]
+  },
+  {
+   "id": "prep",
+   "label": "Sample preparation",
+   "icon": "fa-flask",
+   "types": [
+    "plunge",
+    "coater",
+    "hpf",
+    "pattern",
+    "bench",
+    "prep"
+   ]
+  },
+  {
+   "id": "light",
+   "label": "Light microscopy",
+   "icon": "fa-lightbulb",
+   "types": [
+    "light"
+   ]
+  },
+  {
+   "id": "other",
+   "label": "Other instruments",
+   "icon": "fa-cube",
+   "types": [
+    "other"
+   ]
+  }
+ ]
 }
