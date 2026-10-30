@@ -30,6 +30,41 @@ Reporting an issue
 Your name and email come from your EMhub login; they are never typed in.
 
 
+Following an issue
+------------------
+
+* If someone already reported the problem, the report form lists the open
+  issues on that instrument. Click **I'm also affected** to follow that issue
+  instead of creating a duplicate.
+* The issue page shows the history, comments and files (screenshots, PDF or
+  log files up to 20 MB). Reporters and affected users can comment, add files
+  and **reopen** a resolved issue if the problem comes back.
+* Reporters get an email receipt, and emails when staff acknowledge, reply,
+  resolve or reopen their issue.
+
+
+Staff workflow
+--------------
+
+Issues move through these states::
+
+    New -> Acknowledged -> Investigating -> Waiting for vendor -> Resolved -> Closed
+                                     (Reopened, Duplicate)
+
+* The first staff action (acknowledge, comment, change) is recorded as the
+  **first response**. Acknowledging assigns the issue to you if nobody has it.
+* **Instrument state** (operational, degraded, unavailable) is separate from the
+  ticket status. Changing it records downtime intervals, which are closed when
+  the issue is resolved, so restoration time is measured separately from
+  administrative closure.
+* **Resolve** asks how it was fixed, the root cause, notes, user time lost and
+  whether data was lost. These feed the insights.
+* **Duplicate of...** closes an issue and adds its reporter to the original.
+* Comments and files can be marked **staff only**.
+* **Post notice** shows a service banner (for one instrument or all of them)
+  on the issue pages and the report form, optionally until a given time.
+
+
 Who can see what
 ----------------
 
@@ -78,6 +113,40 @@ Then create the database schema and the default settings:
     emh-issues status             # check the schema is up to date
 
 Restart EMhub after enabling the module.
+
+Notifications and the worker
+............................
+
+Notifications are queued in the database together with the change that
+triggered them and sent by a separate worker process, so a mail or Teams
+outage never blocks or loses a report. Run it as a service:
+
+.. code-block:: bash
+
+    emh-issues worker              # runs every 10 seconds
+    emh-issues worker --once       # process once, e.g. from cron
+
+Email uses the EMhub mail settings (``MAIL_SERVER``, ``MAIL_PORT``,
+``MAIL_USE_TLS``, ``MAIL_DEFAULT_SENDER``). Failed deliveries are retried with
+increasing delays; permanent failures are listed in **Settings** where admins
+can retry them. The worker also alerts the escalation contacts when an issue is
+not acknowledged in time.
+
+Microsoft Teams channels are reached through a Teams *Workflow* ("When a Teams
+webhook request is received" -> post card in a channel). Workflow URLs are
+secrets, so they are defined only on the server, never in the database:
+
+.. code-block:: python
+
+    # config.py (or environment variables ISSUES_WEBHOOK_<NAME>)
+    ISSUES_WEBHOOKS = {'cryoem-channel': 'https://...logic.azure.com/...'}
+    ISSUES_BASE_URL = 'https://emhub.example.org'   # links in emails and cards
+    ISSUES_FILES = '/data/emhub-issues/files'       # default: <instance>/issue_files
+
+Admins then choose recipients in **Microscope Issues -> Settings**: facility
+emails and webhooks for every new issue, extra recipients by instrument and
+urgency, escalation contacts and acknowledgement times, and a **Queue test**
+button to check delivery.
 
 Settings (``config:issues``)
 ............................
