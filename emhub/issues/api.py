@@ -198,6 +198,21 @@ def update_issue(issue_id):
     return flask.jsonify({'issue': svc.issue_json(issue, detail=True)})
 
 
+@issues_bp.route('/instruments/<int:instrument_id>/open_issues', methods=['GET'])
+def open_on_instrument(instrument_id):
+    """ Open issues on an instrument, shown on the report form. """
+    return flask.jsonify({'issues': _service().open_on_instrument(instrument_id)})
+
+
+@issues_bp.route('/issues/<int:issue_id>/join', methods=['POST'])
+def join_issue(issue_id):
+    """ 'I have this too' from the report form. """
+    svc = _service()
+    svc.join_issue(issue_id)
+    return flask.jsonify({'issue': next(i for i in svc.open_on_instrument(
+        svc._issue(issue_id).instrument_id) if i['id'] == issue_id)})
+
+
 @issues_bp.route('/issues/<int:issue_id>/comments', methods=['POST'])
 def add_comment(issue_id):
     svc = _service()

@@ -156,6 +156,8 @@
                                 Marked as duplicate of {{ e.data.duplicate_of }}{{ who }}
                             {% elif e.kind == 'duplicate_merged' %}
                                 {{ e.data.ticket }} ({{ e.data.reporter }}) was merged into this issue{{ who }}
+                            {% elif e.kind == 'affected_joined' %}
+                                {{ e.data.name }} has this problem too
                             {% elif e.kind == 'attachment' %}
                                 File {{ e.data.filename }} added{{ who }}
                             {% elif e.kind == 'waiting_vendor' %}

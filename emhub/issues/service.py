@@ -393,6 +393,10 @@ class IssuesService:
         area = {'id': area_id, 'label': label, **limits(data)}
         if data.get('staffOnly'):
             area['staffOnly'] = True
+        if (m := data.get('suggestSeverity')) not in (None, ''):
+            if m not in severities:
+                errors['suggestSeverity'] = 'Unknown urgency.'
+            area['suggestSeverity'] = m
         for key in ('hold', 'record', 'general', 'avoid'):
             if items := lines(data, key):
                 area[key] = items
@@ -916,6 +920,44 @@ class IssuesService:
         event = self._add_event(issue, user, 'comment', {'text': text}, internal=bool(internal))
         self._save(issue, user)
         return event
+
+    def open_on_instrument(self, instrument_id, user=None):
+        """ Open issues on an instrument, as the report form shows them to
+        any user before reporting: what the problem is and how many people
+        it affects, without names, descriptions or history. """
+        user = user if user is not None else self.app.user
+        require(self.roles(user), REPORTER)
+        try:
+            instrument_id = int(instrument_id)
+        except (TypeError, ValueError):
+            return []
+        areas = {a['id']: a['label'] for a in self.problem_areas(include_hidden=True)}
+        items = [i for i in self.store.issues(status=Issue.OPEN_STATUSES)
+                 if i.instrument_id == instrument_id]
+        items.sort(key=lambda i: as_utc(i.reported_at), reverse=True)
+        return [{'id': i.id, 'ticket': i.ticket,
+                 'problem_area': i.problem_area,
+                 'area_label': areas.get(i.problem_area, i.problem_area),
+                 'symptoms': [sy.label for sy in i.symptoms],
+                 'severity': i.severity, 'status': i.status,
+                 'reported_at': iso(i.reported_at),
+                 'people': 1 + len(i.affected),
+                 'is_mine': i.reporter_id == user.id or
+                            any(a.user_id == user.id for a in i.affected)}
+                for i in items[:10]]
+
+    def join_issue(self, issue_id, user=None):
+        """ 'I have this too': the user follows an open issue (gets its
+        updates) instead of reporting it again. """
+        user = user if user is not None else self.app.user
+        require(self.roles(user), REPORTER)
+        issue = self._issue(issue_id)
+        if not issue.is_open:
+            raise ValidationError({'issue': 'This issue is already closed. Report it again.'})
+        if self._add_affected(issue, user.id, user.name, user.email):
+            self._add_event(issue, user, 'affected_joined', {'name': user.name}, internal=True)
+            self._save(issue, user)
+        return issue
 
     def _add_affected(self, issue, user_id, name, email):
         if user_id == issue.reporter_id or any(a.user_id == user_id for a in issue.affected):

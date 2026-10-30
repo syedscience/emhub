@@ -57,12 +57,13 @@
                         <span class="step-num">1</span>
                         <div><h2>Which instrument?</h2><p>Pick the instrument you are using.</p></div>
                     </div>
+                    <div class="chosen" id="mi-inst-chosen" style="display: none"></div>
                     <div id="mi-inst-tiles"></div>
                     <div class="ferr" data-for="instrument_id"></div>
 
                     <div id="mi-session" style="display: none">
-                        <div class="subhead">Session details <span class="opt">(optional, but they help staff)</span></div>
-                        <div class="frow three">
+                        <button type="button" class="more" id="mi-session-toggle" aria-expanded="false"></button>
+                        <div class="frow three" id="mi-session-fields" style="display: none">
                             <div data-field="detector">
                                 <label class="f" for="mi-detector">Detector</label>
                                 <select id="mi-detector" data-context="detector"></select>
@@ -97,6 +98,7 @@
                         <span class="step-num">2</span>
                         <div><h2>What is wrong?</h2><p>Choose the closest area, then tick what you see.</p></div>
                     </div>
+                    <div id="mi-open"></div>
                     <div id="mi-area-tiles"><p class="empty-note">Pick an instrument first.</p></div>
                     <div class="ferr" data-for="problem_area"></div>
 
@@ -129,6 +131,8 @@
                         <div><h2>How urgent is it?</h2><p>Staff use this to decide how fast to come.</p></div>
                     </div>
                     <div class="sevs" id="mi-severities" role="radiogroup" aria-label="Urgency"></div>
+                    <p class="sev-note" id="mi-sev-note" style="display: none"><i class="fas fa-magic"></i>
+                        Suggested for this problem. Pick another if it is more or less urgent.</p>
                     <p class="bump" id="mi-bump" style="display: none"></p>
                     <div class="ferr" data-for="severity"></div>
                     <div class="frow one" style="margin: 18px 0 0">
@@ -201,6 +205,9 @@
     var meta = null, areasById = {}, sevById = {}, noticeRequest = 0, noticeInstruments = {};
     var sent = null;        // {ticket, at, severity} once the report is saved
     var ticked = {};        // checks ticked in the panel, by step id
+    var instOpen = false;   // instrument tiles shown although one is chosen
+    var sevPicked = false;  // urgency chosen by the user (not the suggestion)
+    var sessionOpen = false, openRequest = 0;
     // One key per form load, so double clicks or retries create one issue
     var idempotencyKey = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
         : String(Date.now()) + Math.random().toString(16).slice(2);
@@ -271,6 +278,27 @@
             });
         });
         markTiles();
+        renderChosen();
+    }
+
+    function groupOf(inst) {
+        return (meta.instrument_groups || []).find(function (g) {
+            return g.types.indexOf(inst.instrument_type) >= 0; }) || {icon: 'fa-cube'};
+    }
+
+    // Once an instrument is chosen, show it on one line instead of all tiles
+    function renderChosen() {
+        var inst = selectedInstrument(), box = $('#mi-inst-chosen');
+        var collapsed = !!inst && !instOpen;
+        box.toggle(collapsed);
+        $('#mi-inst-tiles').toggle(!collapsed);
+        if (!collapsed) return;
+        var session = selectedSession(), from = session && String(session.instrument_id) === String(inst.id);
+        box.empty().append(
+            $('<span class="ic">').append($('<i class="fas">').addClass(groupOf(inst).icon || 'fa-cube')),
+            $('<div class="cname">').append($('<b>').text(inst.name),
+                $('<span>').text(from ? 'From your booking' : 'Selected')),
+            $('<button type="button" class="btn-mi small" id="mi-inst-change">').text('Change'));
     }
 
     // Choices for one session field, for the instrument's type
@@ -298,6 +326,29 @@
             if (useless) sel.val(choices[0] || '');
             $('[data-field=' + field + ']').toggle(!useless);
         });
+        // A booking on now means the session is running, unless the user says otherwise
+        var status = $('#mi-sstatus'), x = selectedSession();
+        if (!status.data('picked')) status.val(x && isNow(x) ? 'Running' : '');
+        renderSessionSummary();
+    }
+
+    function isNow(x) {
+        var now = Date.now();
+        return new Date(x.start).getTime() <= now && (!x.end || now <= new Date(x.end).getTime());
+    }
+
+    function renderSessionSummary() {
+        var values = [];
+        $('[data-context]').each(function () {
+            var v = $(this).val();
+            // Fields hidden for this instrument (e.g. no detector) do not count
+            if (v && $('[data-field=' + $(this).data('context') + ']').css('display') !== 'none') values.push(v);
+        });
+        $('#mi-session-fields').toggle(sessionOpen);
+        $('#mi-session-toggle').attr('aria-expanded', String(sessionOpen)).html(sessionOpen
+            ? '<i class="fas fa-chevron-up"></i> Hide session details'
+            : '<i class="fas fa-' + (values.length ? 'pencil-alt' : 'plus') + '"></i> ' +
+              (values.length ? 'Session details: ' + esc(values.join(' · ')) : 'Add session details <span class="opt">optional</span>'));
     }
 
     function loadNotices() {
@@ -323,6 +374,55 @@
         });
     }
 
+    // ---------------- Already reported on this instrument ----------------
+    function ago(iso) {
+        var m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+        if (m < 1) return 'just now';
+        if (m < 60) return m + ' min ago';
+        if (m < 48 * 60) return Math.round(m / 60) + ' h ago';
+        return Math.round(m / 1440) + ' days ago';
+    }
+
+    function renderOpen() {
+        var inst = selectedInstrument(), box = $('#mi-open'), req = ++openRequest;
+        if (!inst) { box.empty(); return; }
+        $.getJSON(MI.api + '/instruments/' + inst.id + '/open_issues').done(function (data) {
+            if (req !== openRequest) return;
+            box.empty();
+            if (!data.issues.length) return;
+            var card = $('<div class="already">').appendTo(box).append(
+                $('<div class="already-head">').append('<i class="fas fa-info-circle"></i>',
+                    $('<span>').html('<b>Already reported on ' + esc(inst.name) + '.</b> If it is the same problem, ' +
+                                     'say so instead of reporting it again. You will get its updates.')));
+            data.issues.forEach(function (i) {
+                var what = i.area_label + (i.symptoms.length ? ': ' + i.symptoms.join(', ') : '');
+                var row = $('<div class="already-row">').attr('data-issue', i.id).append(
+                    $('<div class="what">').append($('<b>').text(what),
+                        $('<span>').text(i.ticket + ' · reported ' + ago(i.reported_at) + ' · ' +
+                                         i.people + (i.people === 1 ? ' person' : ' people') + ' affected')));
+                row.append(i.is_mine
+                    ? $('<span class="pill st-done">').html('<i class="fas fa-check"></i> You are following it')
+                    : $('<button type="button" class="btn-mi small primary join">').text('I have this too'));
+                card.append(row);
+            });
+        });
+    }
+
+    function join(btn) {
+        var row = btn.closest('.already-row'), id = row.data('issue');
+        btn.prop('disabled', true);
+        MI.post('/issues/' + id + '/join', {}, function (data) {
+            var i = data.issue;
+            row.find('.what span').text(i.ticket + ' · ' + i.people + ' people affected');
+            btn.replaceWith($('<span class="pill st-done">').html('<i class="fas fa-check"></i> You are following it'));
+            $('#mi-lock-text').html('<b><i class="fas fa-check-circle"></i> Staff know ' + esc(i.ticket) +
+                ' affects you too.</b> You will get its updates by email. Nothing else to fill in.');
+            $('#mi-open-issue').hide();
+            $('#mi-lock').show();
+            window.scrollTo(0, 0);
+        }, '#mi-form-error').fail(function () { btn.prop('disabled', false); });
+    }
+
     // ---------------- Problem areas ----------------
     function renderAreas() {
         var inst = selectedInstrument(), keep = $('#mi-area').val();
@@ -345,6 +445,8 @@
         fillContext();
         renderSymptoms();
         renderNotices();
+        renderOpen();
+        renderChosen();
     }
 
     function renderSymptoms() {
@@ -392,7 +494,24 @@
         return (min && sevById[min].rank > sevById[chosen].rank) ? min : chosen;
     }
 
+    // The urgency to pre-select: the area's suggestion, raised to its minimum
+    function suggestedSeverity() {
+        var area = selectedArea(), best = minimumSeverity();
+        if (!area) return null;
+        var s = area.suggestSeverity;
+        if (sevById[s] && (!best || sevById[s].rank > sevById[best].rank)) best = s;
+        return best;
+    }
+
     function refresh() {
+        if (!sevPicked && !sent) {
+            var suggestion = suggestedSeverity();
+            $('input[name=severity]').prop('checked', false);
+            if (suggestion) $('#mi-sev-' + suggestion).prop('checked', true);
+            $('#mi-sev-note').toggle(!!suggestion);
+        } else {
+            $('#mi-sev-note').hide();
+        }
         var min = minimumSeverity(), chosen = $('input[name=severity]:checked').val();
         if (min && chosen && sevById[chosen].rank < sevById[min].rank) {
             $('#mi-bump').html('<i class="fas fa-info-circle"></i> This problem is always treated as at least <b>' +
@@ -630,6 +749,7 @@
         });
 
         $('#mi-inst-tiles').on('click', '.tile', function () {
+            instOpen = false;
             $('#mi-instrument').val(String($(this).data('id'))).trigger('change');
         });
         $('#mi-area-tiles').on('click', '.tile', function () {
@@ -648,6 +768,9 @@
             var x = selectedSession();
             if (x && String(x.instrument_id) !== $('#mi-instrument').val()) {
                 $('#mi-instrument').val(String(x.instrument_id)).trigger('change');
+            } else {
+                fillContext();
+                renderChosen();
             }
         });
         $('#mi-area').on('change', renderSymptoms);
@@ -656,7 +779,12 @@
             var v = $(this).val();
             $('#mi-occurred-row').toggle(v === 'More than an hour ago' || v === 'Comes and goes');
         });
-        $('#mi-report-form').on('change', '#mi-symptoms input, input[name=severity]', refresh);
+        $('#mi-report-form').on('change', '#mi-symptoms input', refresh);
+        $('#mi-report-form').on('change', 'input[name=severity]', function () { sevPicked = true; refresh(); });
+        $('#mi-inst-chosen').on('click', '#mi-inst-change', function () { instOpen = true; renderChosen(); });
+        $('#mi-session-toggle').on('click', function () { sessionOpen = !sessionOpen; renderSessionSummary(); });
+        $('[data-context]').on('change', renderSessionSummary);
+        $('#mi-open').on('click', '.join', function () { join($(this)); });
         $('#mi-description, #mi-contact').on('input', renderProgress);
         $('#mi-panel').on('change', 'input[data-step]', function () {
             ticked[$(this).data('step')] = this.checked;
@@ -675,6 +803,7 @@
             $('#mi-instrument, #mi-area').val('');
             $('[data-context]').data('picked', false);
             $('#mi-booking').val('');
+            instOpen = sevPicked = sessionOpen = false;
             ticked = {};
             showErrors({}, null);
             $('#mi-occurred-row').hide();

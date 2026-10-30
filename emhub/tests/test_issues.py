@@ -226,6 +226,32 @@ class TestIssues(unittest.TestCase):
         other = self.get_issue(r.get_json()['issue']['id'])
         self.assertNotIn('booking_id', other['context'])
 
+    def test_i_have_this_too(self):
+        issue = self.new_issue()
+        client = self.client_for(self.other)
+        url = '/api/mi/instruments/%d/open_issues' % self.krios.id
+        found = next(i for i in client.get(url).get_json()['issues'] if i['id'] == issue['id'])
+        self.assertEqual(found['people'], 1)
+        self.assertFalse(found['is_mine'])
+        self.assertNotIn('reporter_name', found)  # users never see who reported
+        self.assertNotIn('description', found)
+
+        for _ in range(2):  # joining twice counts once
+            r = self.post(client, '/api/mi/issues/%d/join' % issue['id'], {}, user=self.other)
+            self.assertEqual(r.status_code, 200, r.get_json())
+        self.assertEqual(r.get_json()['issue']['people'], 2)
+        self.assertTrue(r.get_json()['issue']['is_mine'])
+        full = self.get_issue(issue['id'])
+        self.assertEqual(full['affected'], [self.other.name])
+        self.assertTrue(any(e['kind'] == 'affected_joined' for e in full['events']))
+
+        # Closed issues cannot be joined
+        original = self.new_issue()
+        r, _ = self.act(self.manager, full, 'duplicate', duplicate_of=original['ticket'])
+        self.assertEqual(r.status_code, 200, r.get_json())
+        r = self.post(client, '/api/mi/issues/%d/join' % issue['id'], {}, user=self.other)
+        self.assertEqual(r.status_code, 422)
+
     def test_reporters_only_get_a_receipt(self):
         r = self.report(contact='Room B-101')
         self.assertEqual(r.status_code, 201, r.get_json())

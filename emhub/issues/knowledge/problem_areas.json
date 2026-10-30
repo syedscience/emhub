@@ -66,6 +66,7 @@
   {
    "id": "loader",
    "label": "Autoloader, cassette or grid transfer",
+   "suggestSeverity": "degraded",
    "minSeverity": "blocked",
    "staffOnly": true,
    "hold": [
@@ -106,6 +107,7 @@
   {
    "id": "holder",
    "label": "Cryo-holder or side-entry insertion",
+   "suggestSeverity": "blocked",
    "only_types": [
     "screen"
    ],
@@ -166,6 +168,7 @@
   {
    "id": "vacuum",
    "label": "Vacuum, LN2 level or temperature alarm",
+   "suggestSeverity": "degraded",
    "minSeverity": "stop",
    "staffOnly": true,
    "hold": [
@@ -201,6 +204,7 @@
   {
    "id": "beam",
    "label": "Beam, illumination or alignments",
+   "suggestSeverity": "blocked",
    "general": [
     "Confirm you are on the intended preset (magnification, spot size, C2 intensity) and nothing was changed after the last alignment.",
     "Confirm the column valves are open and the screen is raised.",
@@ -257,6 +261,7 @@
   {
    "id": "stage",
    "label": "Stage, eucentric height, focus or tilt tracking",
+   "suggestSeverity": "degraded",
    "general": [
     "Note the position, tilt angle and time when it started.",
     "Compare the same behavior at a second position to separate a local problem from a global one."
@@ -326,6 +331,7 @@
   {
    "id": "detector",
    "label": "Detector, gain reference or frame saving",
+   "suggestSeverity": "blocked",
    "general": [
     "Check the camera status in the camera software: inserted or retracted, ready, and connected.",
     "Acquire one short test exposure in a plain area to see whether it completes."
@@ -377,6 +383,7 @@
   {
    "id": "filter",
    "label": "Energy filter or slit",
+   "suggestSeverity": "degraded",
    "general": [
     "Confirm the slit is inserted at the width set in your protocol."
    ],
@@ -415,6 +422,7 @@
   {
    "id": "software",
    "label": "Acquisition software (EPU, SerialEM, Tomo5)",
+   "suggestSeverity": "blocked",
    "general": [
     "Take a screenshot of the status or error and note the time.",
     "Check the software log for the last error line and report it to staff."
@@ -466,6 +474,7 @@
   {
    "id": "specimen",
    "label": "Ice, contamination or grid quality",
+   "suggestSeverity": "degraded",
    "general": [
     "Compare several squares across the grid before deciding it is a whole-grid problem.",
     "Record grid slot and squares examined so staff and your lab can follow up."
@@ -525,6 +534,7 @@
   {
    "id": "quality",
    "label": "Data quality (CTF, motion, resolution)",
+   "suggestSeverity": "degraded",
    "general": [
     "Run motion correction and CTF estimation on the first 50 to 100 micrographs.",
     "Plot CTF fit resolution, astigmatism, and measured defocus against your target defocus range.",
@@ -561,6 +571,7 @@
   {
    "id": "fib_transfer",
    "label": "Shuttle, autoloader or sample transfer",
+   "suggestSeverity": "degraded",
    "only_types": [
     "fib"
    ],
@@ -600,6 +611,7 @@
   {
    "id": "fib",
    "label": "Lamella milling",
+   "suggestSeverity": "degraded",
    "general": [
     "Pause milling and do not start the next step until the problem is clear.",
     "Save the current positions and record the milling step, current and pattern you were on."
@@ -645,6 +657,7 @@
   {
    "id": "fib_imaging",
    "label": "SEM or ion-beam imaging",
+   "suggestSeverity": "blocked",
    "only_types": [
     "fib"
    ],
@@ -697,6 +710,7 @@
   {
    "id": "fib_coating",
    "label": "GIS or sputter coating",
+   "suggestSeverity": "degraded",
    "only_types": [
     "fib"
    ],
@@ -730,6 +744,7 @@
   {
    "id": "fib_auto",
    "label": "Automation software (AutoTEM, Maps, WebUI)",
+   "suggestSeverity": "blocked",
    "only_types": [
     "fib"
    ],
@@ -773,6 +788,7 @@
   {
    "id": "liftout",
    "label": "Lift-out or micromanipulator needle",
+   "suggestSeverity": "blocked",
    "only_types": [
     "fib"
    ],
@@ -812,6 +828,7 @@
   {
    "id": "plunge_humidity",
    "label": "Humidity or chamber temperature",
+   "suggestSeverity": "blocked",
    "only_types": [
     "plunge"
    ],
@@ -856,6 +873,7 @@
   {
    "id": "plunge_blot",
    "label": "Blotting or ice thickness",
+   "suggestSeverity": "degraded",
    "only_types": [
     "plunge"
    ],
@@ -897,6 +915,7 @@
   {
    "id": "plunge_cryogen",
    "label": "Ethane, LN2 or cryogen container",
+   "suggestSeverity": "blocked",
    "only_types": [
     "plunge"
    ],
@@ -949,6 +968,7 @@
   {
    "id": "plunge_mech",
    "label": "Tweezers, plunger or grid handling",
+   "suggestSeverity": "blocked",
    "only_types": [
     "plunge"
    ],
@@ -991,6 +1011,7 @@
   {
    "id": "coat_vacuum",
    "label": "Chamber will not pump down or vent",
+   "suggestSeverity": "blocked",
    "only_types": [
     "coater"
    ],
@@ -1025,6 +1046,7 @@
   {
    "id": "coat_glow",
    "label": "Glow discharge or plasma cleaning",
+   "suggestSeverity": "blocked",
    "only_types": [
     "coater"
    ],
@@ -1055,6 +1077,7 @@
   {
    "id": "coat_coating",
    "label": "Carbon or metal coating",
+   "suggestSeverity": "degraded",
    "only_types": [
     "coater"
    ],
@@ -1097,6 +1120,7 @@
   {
    "id": "hpf_ln2",
    "label": "LN2 supply or freezing pressure",
+   "suggestSeverity": "degraded",
    "only_types": [
     "hpf"
    ],
@@ -1130,6 +1154,7 @@
   {
    "id": "hpf_carrier",
    "label": "Sample carriers or loading",
+   "suggestSeverity": "blocked",
    "only_types": [
     "hpf"
    ],
@@ -1171,6 +1196,7 @@
   {
    "id": "pattern_uv",
    "label": "UV light or pattern projection",
+   "suggestSeverity": "blocked",
    "only_types": [
     "pattern"
    ],
@@ -1204,6 +1230,7 @@
   {
    "id": "pattern_result",
    "label": "Patterning result (PLPP, protein binding)",
+   "suggestSeverity": "degraded",
    "only_types": [
     "pattern"
    ],
@@ -1233,6 +1260,7 @@
   {
    "id": "pattern_sw",
    "label": "Patterning software (Leonardo)",
+   "suggestSeverity": "blocked",
    "only_types": [
     "pattern"
    ],
@@ -1261,6 +1289,7 @@
   {
    "id": "light_laser",
    "label": "Lasers or light source",
+   "suggestSeverity": "blocked",
    "only_types": [
     "light"
    ],
@@ -1302,6 +1331,7 @@
   {
    "id": "light_image",
    "label": "Image quality, focus or Airyscan processing",
+   "suggestSeverity": "degraded",
    "only_types": [
     "light"
    ],
@@ -1340,6 +1370,7 @@
   {
    "id": "light_stage",
    "label": "Stage, objectives or incubation",
+   "suggestSeverity": "degraded",
    "only_types": [
     "light"
    ],
@@ -1381,6 +1412,7 @@
   {
    "id": "light_sw",
    "label": "ZEN software or computer",
+   "suggestSeverity": "blocked",
    "only_types": [
     "light"
    ],
@@ -1412,6 +1444,7 @@
   {
    "id": "prep_controls",
    "label": "Controls, display or error message",
+   "suggestSeverity": "blocked",
    "only_types": [
     "plunge",
     "coater",
@@ -1459,6 +1492,7 @@
   {
    "id": "bench_equipment",
    "label": "Bench equipment (pipettes, centrifuge, fume hood)",
+   "suggestSeverity": "degraded",
    "only_types": [
     "bench",
     "prep"
@@ -1498,6 +1532,7 @@
   {
    "id": "supplies",
    "label": "Supplies or consumables running out",
+   "suggestSeverity": "question",
    "only_types": [
     "plunge",
     "coater",
@@ -1545,6 +1580,7 @@
   {
    "id": "data",
    "label": "Data transfer, storage or network",
+   "suggestSeverity": "degraded",
    "avoid": [
     "Do not delete, rename or move collected data until staff confirm it is safe."
    ],
@@ -1587,6 +1623,7 @@
   {
    "id": "emhub_data",
    "label": "EMhub data transfer or data access",
+   "suggestSeverity": "question",
    "general": [
     "Write down your EMhub session or project name, the instrument, and the date of the collection.",
     "Take a screenshot of what EMhub shows (missing session, wrong counts, error message) and note the time."
@@ -1644,6 +1681,7 @@
   {
    "id": "emhub_book",
    "label": "EMhub booking or scheduling",
+   "suggestSeverity": "question",
    "general": [
     "Write down the instrument, date, time slot and booking name or ID involved.",
     "Take a screenshot of the calendar or booking screen."

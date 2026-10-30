@@ -49,6 +49,12 @@
                         <select id="ed-min"></select>
                         <div class="ferr" data-for="minSeverity"></div>
                     </div>
+                    <div>
+                        <label class="f" for="ed-suggest">Suggested urgency
+                            <span class="hint">Pre-selected on the form; users can change it.</span></label>
+                        <select id="ed-suggest"></select>
+                        <div class="ferr" data-for="suggestSeverity"></div>
+                    </div>
                 </div>
 
                 <div class="frow one">
@@ -236,6 +242,7 @@
         $('#ed-label').val(editing.label);
         $('#ed-type').val(editing.staffOnly ? 'staff' : 'normal');
         sevOptions('#ed-min', editing.minSeverity, 'No change');
+        sevOptions('#ed-suggest', editing.suggestSeverity, 'None, users choose');
         var types = allowedTypes(editing), tbox = $('#ed-types').empty();
         Object.keys(cat.instrument_types).forEach(function (t) {
             tbox.append(chip(t, cat.instrument_types[t], types.indexOf(t) >= 0));
@@ -268,6 +275,7 @@
             label: $('#ed-label').val(),
             staffOnly: $('#ed-type').val() === 'staff',
             minSeverity: $('#ed-min').val(),
+            suggestSeverity: $('#ed-suggest').val(),
             only_types: checkedVals('#ed-types'),
             only_instruments: checkedVals('#ed-instruments').map(Number),
             hold: lines('#ed-hold'), general: lines('#ed-general'),
