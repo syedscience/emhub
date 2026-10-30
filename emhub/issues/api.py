@@ -306,6 +306,11 @@ def save_settings():
     return flask.jsonify({'notifications': svc.save_settings(_json_body())})
 
 
+@issues_bp.route('/settings/facility', methods=['POST'])
+def save_facility():
+    return flask.jsonify(_service().save_facility(_json_body()))
+
+
 @issues_bp.route('/settings/test', methods=['POST'])
 def send_test():
     data = _json_body()

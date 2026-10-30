@@ -821,6 +821,21 @@ class TestIssues(unittest.TestCase):
             self.svc.escalate_overdue(now=later)
         self.assertNotIn('escalated', [m.kind for m in self.outbox(acked['id'])])
 
+    def test_facility_name(self):
+        url = '/api/mi/settings/facility'
+        name = "Cryo-EM/ET Center, St. Jude Children's Research Hospital"
+        r = self.post(self.client_for(self.reporter), url, {'facility_name': name}, user=self.reporter)
+        self.assertEqual(r.status_code, 403)
+        mc = self.client_for(self.manager)
+        r = self.post(mc, url, {'facility_name': ' '}, user=self.manager)
+        self.assertEqual(r.status_code, 422)
+        r = self.post(mc, url, {'facility_name': name, 'staff_phone': '901-555-0100'}, user=self.manager)
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.addCleanup(self.post, mc, url, {'facility_name': 'Cryo-EM Facility'}, self.manager)
+        status, html = self.content(self.reporter, content_id='mi_report')
+        self.assertIn('Cryo-EM/ET Center, St. Jude Children&#39;s Research Hospital', html)
+        self.assertIn('901-555-0100', html)
+
     def test_settings_page(self):
         for user in (self.manager, self.admin):
             status, html = self.content(user, content_id='mi_settings')

@@ -18,6 +18,23 @@
     <div class="row">
         <div class="col-xl-7 col-12">
             <div class="card">
+                <div class="card-header"><h5 class="mb-0"><i class="fas fa-building"></i> Facility</h5></div>
+                <div class="card-body">
+                    <div class="form-group">
+                        <label for="mi-set-facility">Facility name (shown at the top of every page)</label>
+                        <input type="text" class="form-control" id="mi-set-facility" maxlength="120"
+                               value="{{ facility_name }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="mi-set-phone">Staff phone for urgent problems (optional)</label>
+                        <input type="text" class="form-control" id="mi-set-phone" maxlength="40"
+                               value="{{ staff_phone }}" placeholder="e.g. 901-595-0000">
+                    </div>
+                    <button type="button" class="btn btn-primary" id="mi-save-facility">Save</button>
+                </div>
+            </div>
+
+            <div class="card">
                 <div class="card-header"><h5 class="mb-0"><i class="fas fa-bell"></i> Notifications</h5></div>
                 <div class="card-body">
                     <div class="form-group">
@@ -260,6 +277,14 @@
                 '#mi-settings-error').fail(function () { box.prop('checked', !box.is(':checked')); });
     });
 
+    $('#mi-save-facility').on('click', function () {
+        $('#mi-settings-error, #mi-settings-ok').hide();
+        MI.post('/settings/facility', {facility_name: $('#mi-set-facility').val(),
+                                       staff_phone: $('#mi-set-phone').val()}, function (data) {
+            $('.mi .fac').text(data.facility_name);
+            $('#mi-settings-ok').text('Facility details saved.').show();
+        }, '#mi-settings-error');
+    });
     $('.mi-retry').on('click', function () { MI.post('/outbox/' + $(this).data('id') + '/retry', {}, reload); });
 })();
 </script>

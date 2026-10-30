@@ -187,6 +187,7 @@ def register_content(dc):
         return {
             **_page(svc),
             'notifications': svc.notification_settings(),
+            'staff_phone': svc.config().get('staff_phone') or '',
             'webhooks': svc.webhook_names(),
             'instruments': svc.instruments(reportable_only=False),
             'severities': svc.severities(),

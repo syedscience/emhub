@@ -1200,6 +1200,28 @@ class IssuesService:
         self.store.commit()
         return notif
 
+    def save_facility(self, payload, user=None):
+        """ The facility name and staff phone shown on the pages. """
+        user = user if user is not None else self.app.user
+        require(self.roles(user), MANAGER)
+        name = ' '.join(str(payload.get('facility_name') or '').split())
+        phone = ' '.join(str(payload.get('staff_phone') or '').split())
+        errors = {}
+        if not name:
+            errors['facility_name'] = 'Enter the facility name.'
+        elif len(name) > 120:
+            errors['facility_name'] = 'Must be at most 120 characters.'
+        if len(phone) > 40:
+            errors['staff_phone'] = 'Must be at most 40 characters.'
+        if errors:
+            raise ValidationError(errors)
+        config = dict(self.config() or DEFAULT_CONFIG)
+        config.update(facility_name=name, staff_phone=phone)
+        self._save_config(config)
+        self._audit(user, 'facility_saved', {'facility_name': name, 'staff_phone': phone})
+        self.store.commit()
+        return {'facility_name': name, 'staff_phone': phone}
+
     def send_test(self, channel, destination, user=None):
         user = user if user is not None else self.app.user
         require(self.roles(user), MANAGER)
