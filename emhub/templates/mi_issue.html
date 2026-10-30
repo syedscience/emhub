@@ -1,4 +1,8 @@
 {% import "mi_macros.html" as mi %}
+{% include "mi_common.html" %}
+
+{% set open_statuses = ['new', 'acknowledged', 'investigating', 'waiting_vendor', 'reopened'] %}
+{% set is_open = issue.status in open_statuses %}
 
 <div class="container-fluid dashboard-content">
     {% set title = issue.ticket ~ ': ' ~ issue.title %}
@@ -10,14 +14,35 @@
             Your report <strong>{{ issue.ticket }}</strong> was saved and the facility staff have been notified.
         </div>
     {% endif %}
+    {% for n in notices %}
+        <div class="alert alert-{{ n.level }}"><i class="fas fa-bullhorn"></i>
+            {% if n.instrument_name %}<strong>{{ n.instrument_name }}:</strong>{% endif %} {{ n.message }}</div>
+    {% endfor %}
+    {% if issue.duplicate_of %}
+        <div class="alert alert-info">This issue is a duplicate of
+            <a href="{{ url_for_content('mi_issue', issue_id=issue.duplicate_of_id) }}">{{ issue.duplicate_of }}</a>.</div>
+    {% endif %}
+    <div class="alert alert-danger" id="mi-page-error" style="display: none"></div>
 
     <div class="row">
         <div class="col-xl-7 col-lg-7 col-12">
             <div class="card">
-                <div class="card-header d-flex align-items-center">
+                <div class="card-header d-flex flex-wrap align-items-center">
                     <h5 class="mb-0 mr-3">{{ issue.instrument_name }}</h5>
                     {{ mi.severity_badge(issue.severity, severities) }}
                     <span class="ml-2">{{ mi.status_badge(issue.status) }}</span>
+                    {% if issue.instrument_state in ['degraded', 'unavailable'] %}
+                        <span class="badge badge-danger ml-2">Instrument {{ issue.instrument_state }}</span>
+                    {% endif %}
+                    <span class="ml-auto">
+                    {% if not issue.is_mine and not issue.is_affected and is_open and not is_staff %}
+                        <button class="btn btn-sm btn-outline-primary" id="mi-join"><i class="fas fa-user-plus"></i> I'm also affected</button>
+                    {% endif %}
+                    {% if issue.is_participant and issue.status in ['resolved', 'closed'] %}
+                        <button class="btn btn-sm btn-outline-danger" data-toggle="modal" data-target="#mi-reopen-modal">
+                            <i class="fas fa-redo"></i> Reopen</button>
+                    {% endif %}
+                    </span>
                 </div>
                 <div class="card-body">
                     <dl class="row mb-0">
@@ -38,6 +63,19 @@
                             <dt class="col-sm-4">Contact</dt>
                             <dd class="col-sm-8">{{ issue.contact }}</dd>
                         {% endif %}
+                        <dt class="col-sm-4">Assigned to</dt>
+                        <dd class="col-sm-8">{{ issue.assignee_name or 'Nobody yet' }}</dd>
+                        {% if issue.acknowledged_at %}
+                            <dt class="col-sm-4">First response</dt>
+                            <dd class="col-sm-8">{{ issue.acknowledged_at|pretty_datetime }}</dd>
+                        {% endif %}
+                        {% if issue.affected %}
+                            <dt class="col-sm-4">Also affected</dt>
+                            <dd class="col-sm-8">{{ issue.affected|join(', ') }}</dd>
+                        {% elif issue.affected_count %}
+                            <dt class="col-sm-4">Also affected</dt>
+                            <dd class="col-sm-8">{{ issue.affected_count }} other user(s)</dd>
+                        {% endif %}
                         {% for key, value in issue.context.items() %}
                             <dt class="col-sm-4">{{ key|replace('_', ' ')|capitalize }}</dt>
                             <dd class="col-sm-8">{{ value }}</dd>
@@ -51,27 +89,177 @@
                         <h6>Already tried</h6>
                         <p style="white-space: pre-wrap">{{ issue.tried }}</p>
                     {% endif %}
+                    {% if issue.resolution and issue.resolution.resolution_type %}
+                        <div class="alert alert-success mb-0">
+                            <strong>{{ issue.resolution.resolution_type }}</strong>
+                            (root cause: {{ issue.resolution.root_cause }})
+                            {% if issue.resolution.resolution_notes %}
+                                <p class="mb-0 mt-1" style="white-space: pre-wrap">{{ issue.resolution.resolution_notes }}</p>
+                            {% endif %}
+                        </div>
+                    {% endif %}
                 </div>
             </div>
+
+            {% if issue.is_participant %}
+            <div class="card">
+                <div class="card-header"><h5 class="mb-0"><i class="fas fa-paperclip"></i> Files</h5></div>
+                <div class="card-body">
+                    {% if issue.attachments %}
+                        <ul class="list-unstyled">
+                        {% for a in issue.attachments %}
+                            <li class="mb-1">
+                                <a href="{{ url_for('issues_api.get_attachment', attachment_id=a.id) }}" target="_blank" rel="noopener">{{ a.filename }}</a>
+                                <small class="text-muted">{{ a.size|pretty_size }}, {{ a.uploaded_by_name }}</small>
+                                {% if a.internal %}<span class="badge badge-dark">staff only</span>{% endif %}
+                            </li>
+                        {% endfor %}
+                        </ul>
+                    {% endif %}
+                    <form class="form-inline" id="mi-upload-form">
+                        <input type="file" class="form-control-file mr-2 mb-2" id="mi-files" name="file" multiple
+                               accept=".png,.jpg,.jpeg,.gif,.pdf,.txt,.log,.csv,.json" style="max-width: 320px">
+                        {% if is_staff %}
+                        <label class="custom-control custom-checkbox mr-2 mb-2">
+                            <input type="checkbox" class="custom-control-input" id="mi-files-internal">
+                            <span class="custom-control-label">Staff only</span>
+                        </label>
+                        {% endif %}
+                        <button type="submit" class="btn btn-sm btn-outline-primary mb-2">Upload</button>
+                    </form>
+                    <small class="text-muted">Screenshots, PDF or log files, up to 20 MB each.</small>
+                </div>
+            </div>
+            {% endif %}
         </div>
 
         <div class="col-xl-5 col-lg-5 col-12">
-            <div class="card">
-                <div class="card-header"><h5 class="mb-0">History</h5></div>
+            {% if is_staff %}
+            <div class="card border-primary">
+                <div class="card-header"><h5 class="mb-0"><i class="fas fa-tools"></i> Staff actions</h5></div>
                 <div class="card-body">
+                    <div class="mb-3">
+                        {% if issue.status in ['new', 'reopened'] %}
+                            <button class="btn btn-sm btn-primary mb-1 mi-action" data-action="acknowledge">Acknowledge</button>
+                        {% endif %}
+                        {% if issue.status in ['new', 'acknowledged', 'reopened', 'waiting_vendor'] %}
+                            <button class="btn btn-sm btn-info mb-1 mi-action" data-action="investigate">Investigating</button>
+                        {% endif %}
+                        {% if issue.status in ['new', 'acknowledged', 'investigating', 'reopened'] %}
+                            <button class="btn btn-sm btn-warning mb-1" data-toggle="modal" data-target="#mi-vendor-modal">Waiting for vendor</button>
+                        {% endif %}
+                        {% if is_open %}
+                            <button class="btn btn-sm btn-success mb-1" data-toggle="modal" data-target="#mi-resolve-modal">Resolve</button>
+                            <button class="btn btn-sm btn-light mb-1" data-toggle="modal" data-target="#mi-duplicate-modal">Duplicate of...</button>
+                        {% endif %}
+                        {% if issue.status == 'resolved' %}
+                            <button class="btn btn-sm btn-secondary mb-1 mi-action" data-action="close">Close</button>
+                        {% endif %}
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group col-6">
+                            <label for="mi-assignee">Assigned to</label>
+                            <select class="form-control form-control-sm" id="mi-assignee">
+                                <option value="">Nobody</option>
+                                {% for u in staff %}
+                                    <option value="{{ u.id }}" {{ 'selected' if u.id == issue.assignee_id }}>{{ u.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-group col-6">
+                            <label for="mi-severity">Urgency</label>
+                            <select class="form-control form-control-sm" id="mi-severity">
+                                {% for sid, s in severities.items() %}
+                                    <option value="{{ sid }}" {{ 'selected' if sid == issue.severity }}>{{ s.label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-group col-6">
+                            <label for="mi-state">Instrument state</label>
+                            <select class="form-control form-control-sm" id="mi-state">
+                                {% for st in ['unknown', 'operational', 'degraded', 'unavailable'] %}
+                                    <option value="{{ st }}" {{ 'selected' if st == issue.instrument_state }}>{{ st|capitalize }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-group col-6">
+                            <label for="mi-state-since">State since</label>
+                            <input type="datetime-local" class="form-control form-control-sm" id="mi-state-since">
+                        </div>
+                    </div>
+                    <button class="btn btn-sm btn-outline-primary" id="mi-update">Save changes</button>
+                    {% if issue.downtimes %}
+                        <h6 class="mt-3">Downtime</h6>
+                        <ul class="list-unstyled mb-0 small">
+                        {% for d in issue.downtimes %}
+                            <li>{{ d.state|capitalize }}: {{ d.start|pretty_datetime }} &ndash;
+                                {{ d.end|pretty_datetime if d.end else 'now' }}</li>
+                        {% endfor %}
+                        </ul>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+
+            <div class="card">
+                <div class="card-header"><h5 class="mb-0">History and comments</h5></div>
+                <div class="card-body">
+                    {% if issue.is_participant or is_staff %}
+                    <form id="mi-comment-form" class="mb-3">
+                        <textarea class="form-control mb-2" id="mi-comment" rows="3" maxlength="5000"
+                                  placeholder="{{ 'Reply or add a note' if is_staff else 'Add information for the staff' }}"></textarea>
+                        <div class="d-flex align-items-center">
+                            {% if is_staff %}
+                            <label class="custom-control custom-checkbox mb-0 mr-3">
+                                <input type="checkbox" class="custom-control-input" id="mi-comment-internal">
+                                <span class="custom-control-label">Internal note (staff only)</span>
+                            </label>
+                            {% endif %}
+                            <button type="submit" class="btn btn-sm btn-primary ml-auto">Comment</button>
+                        </div>
+                    </form>
+                    {% endif %}
                     <ul class="list-unstyled mb-0">
                         {% for e in issue.events|reverse %}
-                            <li class="mb-2">
-                                <small class="text-muted">{{ e.at|pretty_datetime }}</small><br>
+                            <li class="mb-3 {{ 'border-left border-dark pl-2' if e.internal }}">
+                                <small class="text-muted">{{ e.at|pretty_datetime }}
+                                    {% if e.internal %}<span class="badge badge-dark">staff only</span>{% endif %}</small><br>
+                                {% set who = (' by ' ~ e.actor_name) if e.actor_name else '' %}
                                 {% if e.kind == 'created' %}
-                                    Reported{% if e.actor_name %} by {{ e.actor_name }}{% endif %}
+                                    Reported{{ who }}
                                     {% if e.data.bumped_from %}
                                         <br><small class="text-muted">Urgency raised from
                                         {{ severities[e.data.bumped_from].label if e.data.bumped_from in severities else e.data.bumped_from }}
                                         by the problem type.</small>
                                     {% endif %}
+                                {% elif e.kind == 'comment' %}
+                                    <strong>{{ e.actor_name or 'A user' }}</strong>
+                                    <div style="white-space: pre-wrap">{{ e.data.text }}</div>
+                                {% elif e.kind == 'updated' %}
+                                    Updated{{ who }}:
+                                    {% for field, change in e.data.changes.items() %}
+                                        {{ field|replace('_', ' ') }} {{ change[0] or '-' }} &rarr; {{ change[1] or '-' }}{{ ',' if not loop.last }}
+                                    {% endfor %}
+                                {% elif e.kind == 'escalated' %}
+                                    <span class="text-danger">Not acknowledged after {{ e.data.after_minutes }} min{{
+                                        ': escalation contacts alerted' if e.data.contacts else ' (no escalation contacts configured)' }}.</span>
+                                {% elif e.kind == 'reopen' %}
+                                    Reopened{{ who }}: {{ e.data.reason }}
+                                {% elif e.kind == 'resolve' %}
+                                    Resolved{{ who }}
+                                {% elif e.kind == 'duplicate' %}
+                                    Marked as duplicate of {{ e.data.duplicate_of }}{{ who }}
+                                {% elif e.kind == 'duplicate_merged' %}
+                                    {{ e.data.ticket }} ({{ e.data.reporter }}) was merged into this issue{{ who }}
+                                {% elif e.kind == 'affected' %}
+                                    {{ e.actor_name }} is also affected
+                                {% elif e.kind == 'attachment' %}
+                                    File {{ e.data.filename }} added{{ who }}
+                                {% elif e.kind == 'waiting_vendor' %}
+                                    Waiting for vendor{{ ' (' ~ e.data.vendor_ref ~ ')' if e.data.vendor_ref }}{{ who }}
                                 {% else %}
-                                    {{ e.kind|replace('_', ' ')|capitalize }}{% if e.actor_name %} by {{ e.actor_name }}{% endif %}
+                                    {{ {'acknowledge': 'Acknowledged', 'investigate': 'Investigating',
+                                        'close': 'Closed'}.get(e.kind, e.kind|replace('_', ' ')|capitalize) }}{{ who }}
                                 {% endif %}
                             </li>
                         {% endfor %}
@@ -81,3 +269,140 @@
         </div>
     </div>
 </div>
+
+{% macro modal(id, title, button, button_class='btn-primary') -%}
+<div class="modal fade" id="{{ id }}" tabindex="-1" role="dialog" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title">{{ title }}</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+            </div>
+            <div class="modal-body">
+                {{ caller() }}
+                <div class="alert alert-danger mt-2 mb-0 mi-modal-error" style="display: none"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-light" data-dismiss="modal">Cancel</button>
+                <button type="button" class="btn {{ button_class }} mi-modal-ok">{{ button }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+{%- endmacro %}
+
+{% call modal('mi-resolve-modal', 'Resolve ' ~ issue.ticket, 'Resolve', 'btn-success') %}
+    <div class="form-group">
+        <label for="mi-res-type">How was it resolved? <span class="text-danger">*</span></label>
+        <select class="form-control" id="mi-res-type" data-field="resolution_type">
+            <option value=""></option>
+            {% for r in resolution_types %}<option>{{ r }}</option>{% endfor %}
+        </select>
+    </div>
+    <div class="form-group">
+        <label for="mi-res-cause">Root cause <span class="text-danger">*</span></label>
+        <select class="form-control" id="mi-res-cause" data-field="root_cause">
+            <option value=""></option>
+            {% for r in root_causes %}<option>{{ r }}</option>{% endfor %}
+        </select>
+    </div>
+    <div class="form-group">
+        <label for="mi-res-notes">What fixed it</label>
+        <textarea class="form-control" id="mi-res-notes" rows="3" data-field="resolution_notes"></textarea>
+    </div>
+    <div class="form-row">
+        <div class="form-group col-6">
+            <label for="mi-res-lost">User time lost (min)</label>
+            <input type="number" min="0" class="form-control" id="mi-res-lost" data-field="time_lost_min">
+        </div>
+        <div class="form-group col-6">
+            <label for="mi-res-restored">Instrument restored at</label>
+            <input type="datetime-local" class="form-control" id="mi-res-restored" data-field="restored_at">
+        </div>
+    </div>
+    <label class="custom-control custom-checkbox">
+        <input type="checkbox" class="custom-control-input" id="mi-res-data-lost" data-field="data_lost">
+        <span class="custom-control-label">Data was lost</span>
+    </label>
+{% endcall %}
+
+{% call modal('mi-vendor-modal', 'Waiting for vendor', 'Save', 'btn-warning') %}
+    <div class="form-group mb-0">
+        <label for="mi-vendor-ref">Vendor case or reference</label>
+        <input type="text" class="form-control" id="mi-vendor-ref" maxlength="128" data-field="vendor_ref">
+    </div>
+{% endcall %}
+
+{% call modal('mi-duplicate-modal', 'Mark as duplicate', 'Mark as duplicate') %}
+    <div class="form-group mb-0">
+        <label for="mi-dup-of">Ticket of the original issue</label>
+        <input type="text" class="form-control" id="mi-dup-of" placeholder="MI-2026-00001" data-field="duplicate_of">
+        <small class="text-muted">The reporter of this issue will follow the original one.</small>
+    </div>
+{% endcall %}
+
+{% call modal('mi-reopen-modal', 'Reopen ' ~ issue.ticket, 'Reopen', 'btn-danger') %}
+    <div class="form-group mb-0">
+        <label for="mi-reopen-reason">Why is it not fixed? <span class="text-danger">*</span></label>
+        <textarea class="form-control" id="mi-reopen-reason" rows="3" data-field="reason"></textarea>
+    </div>
+{% endcall %}
+
+<script>
+(function () {
+    var ISSUE_ID = {{ issue.id }}, VERSION = {{ issue.version }};
+    var reload = function () { load_main_content('mi_issue', {issue_id: ISSUE_ID}); };
+    var base = '/issues/' + ISSUE_ID;
+
+    function transition(action, extra, errorBox) {
+        MI.post(base + '/transition', $.extend({action: action, version: VERSION}, extra || {}),
+                function () { $('.modal').modal('hide'); $('.modal-backdrop').remove(); reload(); },
+                errorBox || '#mi-page-error');
+    }
+
+    function fields(modal) {
+        var data = {};
+        $(modal).find('[data-field]').each(function () {
+            var el = $(this);
+            data[el.data('field')] = el.is(':checkbox') ? el.is(':checked') : (el.val() || null);
+        });
+        return data;
+    }
+
+    $('.mi-action').on('click', function () { transition($(this).data('action')); });
+    [['#mi-resolve-modal', 'resolve'], ['#mi-vendor-modal', 'wait_vendor'],
+     ['#mi-duplicate-modal', 'duplicate'], ['#mi-reopen-modal', 'reopen']].forEach(function (m) {
+        $(m[0] + ' .mi-modal-ok').on('click', function () {
+            transition(m[1], fields(m[0]), $(m[0] + ' .mi-modal-error'));
+        });
+    });
+
+    $('#mi-update').on('click', function () {
+        MI.post(base + '/update', {
+            version: VERSION,
+            assignee_id: $('#mi-assignee').val() ? parseInt($('#mi-assignee').val()) : null,
+            severity: $('#mi-severity').val(),
+            instrument_state: $('#mi-state').val(),
+            state_since: $('#mi-state-since').val() || null
+        }, reload, '#mi-page-error');
+    });
+
+    $('#mi-join').on('click', function () { MI.post(base + '/join', {}, reload, '#mi-page-error'); });
+
+    $('#mi-comment-form').on('submit', function (e) {
+        e.preventDefault();
+        MI.post(base + '/comments', {text: $('#mi-comment').val(),
+                                     internal: $('#mi-comment-internal').is(':checked')},
+                reload, '#mi-page-error');
+    });
+
+    $('#mi-upload-form').on('submit', function (e) {
+        e.preventDefault();
+        var files = $('#mi-files')[0].files;
+        if (!files.length) return;
+        var form = new FormData();
+        for (var i = 0; i < files.length; i++) form.append('file', files[i]);
+        form.append('internal', $('#mi-files-internal').is(':checked') ? '1' : '0');
+        MI.post(base + '/attachments', form, reload, '#mi-page-error');
+    });
+})();
+</script>

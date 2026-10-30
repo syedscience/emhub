@@ -1,0 +1,27 @@
+{# Shared JavaScript helpers for the Microscope Issues pages #}
+<script>
+var MI = MI || {};
+MI.csrf = "{{ csrf_token }}";
+MI.api = "{{ url_for('issues_api.meta')[:-5] }}";  {# /api/mi #}
+MI.issueUrl = function (id) { return "{{ url_for_content('mi_issue') }}&issue_id=" + id; };
+
+/* POST JSON (or FormData) to the issues API. onOk(data) on success; errors
+   are shown in the element errorBox (a jQuery selector) or with showError. */
+MI.post = function (path, data, onOk, errorBox) {
+    var isForm = (typeof FormData !== 'undefined') && data instanceof FormData;
+    return $.ajax({
+        url: MI.api + path, type: 'POST', dataType: 'json',
+        data: isForm ? data : JSON.stringify(data),
+        contentType: isForm ? false : 'application/json; charset=utf-8',
+        processData: !isForm,
+        headers: {'X-MI-CSRF': MI.csrf}
+    }).done(onOk).fail(function (xhr) {
+        var body = xhr.responseJSON || {};
+        var msg = body.error || ('Request failed (' + xhr.status + ').');
+        if (body.errors) {
+            msg += ' ' + Object.keys(body.errors).map(function (k) { return body.errors[k]; }).join(' ');
+        }
+        if (errorBox) { $(errorBox).text(msg).show(); } else { showError(msg); }
+    });
+};
+</script>

@@ -1,0 +1,251 @@
+{% include "mi_common.html" %}
+
+<div class="container-fluid dashboard-content">
+    {% set title = "Microscope Issues settings" %}
+    {% set about = "Who is notified, escalation times and which instruments accept reports." %}
+    {% set navigation = [('Microscope Issues', url_for_content('mi_issues')), ('Settings', '')] %}
+    {% include 'include_header.html' %}
+
+    <div class="alert alert-danger" id="mi-settings-error" style="display: none"></div>
+    <div class="alert alert-success" id="mi-settings-ok" style="display: none"></div>
+
+    <div class="row">
+        <div class="col-xl-7 col-12">
+            <div class="card">
+                <div class="card-header"><h5 class="mb-0"><i class="fas fa-bell"></i> Notifications</h5></div>
+                <div class="card-body">
+                    <div class="form-group">
+                        <label for="mi-set-email">Facility email addresses (every new issue)</label>
+                        <textarea class="form-control" id="mi-set-email" rows="2"
+                                  placeholder="one or more addresses">{{ notifications.email|join(', ') }}</textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Teams / webhook channels (every new issue, resolved and reopened)</label>
+                        {% if webhooks %}
+                            {% for w in webhooks %}
+                            <label class="custom-control custom-checkbox">
+                                <input type="checkbox" class="custom-control-input mi-set-webhook" value="{{ w }}"
+                                       {{ 'checked' if w in notifications.webhooks }}>
+                                <span class="custom-control-label">{{ w }}</span>
+                            </label>
+                            {% endfor %}
+                        {% else %}
+                            <p class="text-muted small mb-0">No webhooks are configured on the server. Add Teams Workflow
+                                URLs to <code>ISSUES_WEBHOOKS</code> in the instance config.py (they are secrets and
+                                are not stored in the database).</p>
+                        {% endif %}
+                    </div>
+                    <label class="custom-control custom-checkbox">
+                        <input type="checkbox" class="custom-control-input" id="mi-set-receipt" {{ 'checked' if notifications.receipt_to_reporter }}>
+                        <span class="custom-control-label">Send a receipt to the reporter</span>
+                    </label>
+                    <label class="custom-control custom-checkbox">
+                        <input type="checkbox" class="custom-control-input" id="mi-set-notify-reporter" {{ 'checked' if notifications.notify_reporter }}>
+                        <span class="custom-control-label">Email reporters when staff acknowledge, reply or resolve</span>
+                    </label>
+
+                    <h6 class="mt-4">Extra recipients by instrument and urgency</h6>
+                    <table class="table table-sm" id="mi-routes">
+                        <thead><tr><th>Instruments (empty: all)</th><th>From urgency</th><th>Emails</th>
+                            {% if webhooks %}<th>Webhooks</th>{% endif %}<th></th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="mi-add-route">
+                        <i class="fas fa-plus"></i> Add route</button>
+
+                    <h6 class="mt-4">Escalation</h6>
+                    <p class="text-muted small">If nobody acknowledges an issue within these minutes, the escalation
+                        contacts are alerted (once).</p>
+                    <div class="form-row">
+                        {% for sid, s in severities.items() %}
+                        <div class="form-group col-3">
+                            <label for="mi-ack-{{ sid }}">{{ s.label }}</label>
+                            <input type="number" min="1" max="10080" class="form-control mi-ack" id="mi-ack-{{ sid }}"
+                                   data-severity="{{ sid }}" value="{{ notifications.ack_minutes.get(sid, s.ack_minutes) }}">
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <div class="form-group">
+                        <label for="mi-set-esc-email">Escalation emails</label>
+                        <input type="text" class="form-control" id="mi-set-esc-email"
+                               value="{{ notifications.escalation.email|join(', ') }}">
+                    </div>
+                    {% if webhooks %}
+                    <div class="form-group">
+                        <label>Escalation webhooks</label>
+                        {% for w in webhooks %}
+                        <label class="custom-control custom-checkbox">
+                            <input type="checkbox" class="custom-control-input mi-set-esc-webhook" value="{{ w }}"
+                                   {{ 'checked' if w in notifications.escalation.webhooks }}>
+                            <span class="custom-control-label">{{ w }}</span>
+                        </label>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    <button type="button" class="btn btn-primary" id="mi-save-settings">Save settings</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><h5 class="mb-0"><i class="fas fa-paper-plane"></i> Send a test</h5></div>
+                <div class="card-body">
+                    <div class="form-inline">
+                        <select class="form-control mr-2 mb-2" id="mi-test-channel">
+                            <option value="email">Email to</option>
+                            {% if webhooks %}<option value="webhook">Webhook</option>{% endif %}
+                        </select>
+                        <input type="text" class="form-control mr-2 mb-2" id="mi-test-dest" placeholder="address or webhook name"
+                               value="{{ current_user.email }}">
+                        <button type="button" class="btn btn-outline-primary mb-2" id="mi-send-test">Queue test</button>
+                    </div>
+                    <small class="text-muted">The worker (<code>emh-issues worker</code>) sends it; check the delivery
+                        table below.</small>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-5 col-12">
+            <div class="card">
+                <div class="card-header"><h5 class="mb-0"><i class="fas fa-microscope"></i> Instruments</h5></div>
+                <div class="card-body">
+                    <p class="text-muted small">Instruments come from EMhub resources. Inactive resources cannot
+                        receive reports.</p>
+                    <table class="table table-sm mb-0">
+                        <thead><tr><th>Instrument</th><th>Type</th><th>Accepts reports</th></tr></thead>
+                        <tbody>
+                        {% for inst in instruments %}
+                            <tr>
+                                <td>{{ inst.name }}{% if inst.emhub_status != 'active' %}
+                                    <span class="badge badge-light">{{ inst.emhub_status }} in EMhub</span>{% endif %}</td>
+                                <td>{{ inst.instrument_type }}</td>
+                                <td>
+                                    <label class="custom-control custom-checkbox mb-0">
+                                        <input type="checkbox" class="custom-control-input mi-inst-enabled" data-id="{{ inst.id }}"
+                                               {{ 'checked' if inst.enabled }}>
+                                        <span class="custom-control-label"></span>
+                                    </label>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><h5 class="mb-0"><i class="fas fa-heartbeat"></i> Notification delivery</h5></div>
+                <div class="card-body">
+                    <p class="mb-2">
+                        {% for st in ['queued', 'sending', 'retrying', 'accepted', 'failed', 'skipped'] %}
+                            {% if outbox.counts.get(st) %}
+                                <span class="badge badge-{{ {'failed': 'danger', 'retrying': 'warning', 'accepted': 'success'}.get(st, 'light') }} mr-1">
+                                    {{ st }}: {{ outbox.counts[st] }}</span>
+                            {% endif %}
+                        {% endfor %}
+                    </p>
+                    {% if outbox.oldest_pending %}
+                        <p class="small">Oldest waiting message: {{ outbox.oldest_pending|pretty_datetime }}.
+                            If this is old, check that the worker is running.</p>
+                    {% endif %}
+                    {% if outbox.messages %}
+                    <table class="table table-sm small mb-0">
+                        <thead><tr><th>#</th><th>To</th><th>Status</th><th>Last error</th><th></th></tr></thead>
+                        <tbody>
+                        {% for m in outbox.messages %}
+                            <tr>
+                                <td>{{ m.id }}</td>
+                                <td>{{ m.channel }}: {{ m.destination }}<br><span class="text-muted">{{ m.kind }}, {{ m.attempts }} attempt(s)</span></td>
+                                <td>{{ m.status }}</td>
+                                <td style="max-width: 200px; overflow-wrap: anywhere">{{ m.last_error or '' }}</td>
+                                <td>{% if m.status in ['failed', 'skipped'] %}
+                                    <button type="button" class="btn btn-sm btn-link p-0 mi-retry" data-id="{{ m.id }}">Retry</button>
+                                {% endif %}</td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                    {% else %}
+                        <p class="text-muted small mb-0">Nothing waiting or failed.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var INSTRUMENTS = {{ instruments|map(attribute='name')|list|tojson }};
+    var WEBHOOKS = {{ webhooks|tojson }};
+    var SEVERITIES = {{ severities.values()|list|tojson }};
+    var ROUTES = {{ notifications.routes|tojson }};
+    var reload = function () { load_main_content('mi_settings', {}); };
+
+    function splitList(text) {
+        return (text || '').split(/[\s,;]+/).filter(function (x) { return x; });
+    }
+    function checked(sel) { return $(sel + ':checked').map(function () { return $(this).val(); }).get(); }
+
+    function addRoute(route) {
+        route = route || {instruments: [], min_severity: 'question', email: [], webhooks: []};
+        var tr = $('<tr class="mi-route">');
+        var inst = $('<select multiple class="form-control form-control-sm mi-r-inst" size="3">');
+        INSTRUMENTS.forEach(function (n) {
+            inst.append($('<option>').val(n).text(n).prop('selected', route.instruments.indexOf(n) >= 0));
+        });
+        var sev = $('<select class="form-control form-control-sm mi-r-sev">');
+        SEVERITIES.forEach(function (s) {
+            sev.append($('<option>').val(s.id).text(s.label).prop('selected', s.id === route.min_severity));
+        });
+        tr.append($('<td>').append(inst), $('<td>').append(sev),
+                  $('<td>').append($('<input type="text" class="form-control form-control-sm mi-r-email">').val(route.email.join(', '))));
+        if (WEBHOOKS.length) {
+            var hooks = $('<select multiple class="form-control form-control-sm mi-r-hooks" size="2">');
+            WEBHOOKS.forEach(function (w) {
+                hooks.append($('<option>').val(w).text(w).prop('selected', (route.webhooks || []).indexOf(w) >= 0));
+            });
+            tr.append($('<td>').append(hooks));
+        }
+        tr.append($('<td>').append($('<button type="button" class="btn btn-sm btn-link text-danger">&times;</button>')
+            .on('click', function () { tr.remove(); })));
+        $('#mi-routes tbody').append(tr);
+    }
+    ROUTES.forEach(addRoute);
+    $('#mi-add-route').on('click', function () { addRoute(); });
+
+    $('#mi-save-settings').on('click', function () {
+        var ack = {};
+        $('.mi-ack').each(function () { ack[$(this).data('severity')] = parseInt($(this).val()); });
+        var routes = $('.mi-route').map(function () {
+            var tr = $(this);
+            return {instruments: tr.find('.mi-r-inst').val() || [],
+                    min_severity: tr.find('.mi-r-sev').val(),
+                    email: splitList(tr.find('.mi-r-email').val()),
+                    webhooks: tr.find('.mi-r-hooks').val() || []};
+        }).get();
+        $('#mi-settings-error, #mi-settings-ok').hide();
+        MI.post('/settings', {
+            email: splitList($('#mi-set-email').val()),
+            webhooks: checked('.mi-set-webhook'),
+            receipt_to_reporter: $('#mi-set-receipt').is(':checked'),
+            notify_reporter: $('#mi-set-notify-reporter').is(':checked'),
+            escalation: {email: splitList($('#mi-set-esc-email').val()), webhooks: checked('.mi-set-esc-webhook')},
+            routes: routes,
+            ack_minutes: ack
+        }, function () { $('#mi-settings-ok').text('Settings saved.').show(); }, '#mi-settings-error');
+    });
+
+    $('#mi-send-test').on('click', function () {
+        MI.post('/settings/test', {channel: $('#mi-test-channel').val(), destination: $('#mi-test-dest').val()},
+                function () { $('#mi-settings-ok').text('Test message queued.').show(); }, '#mi-settings-error');
+    });
+
+    $('.mi-inst-enabled').on('change', function () {
+        var box = $(this);
+        MI.post('/instruments/' + box.data('id'), {enabled: box.is(':checked')}, function () {},
+                '#mi-settings-error').fail(function () { box.prop('checked', !box.is(':checked')); });
+    });
+
+    $('.mi-retry').on('click', function () { MI.post('/outbox/' + $(this).data('id') + '/retry', {}, reload); });
+})();
+</script>
