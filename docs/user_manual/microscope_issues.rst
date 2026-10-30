@@ -65,6 +65,51 @@ Issues move through these states::
   on the issue pages and the report form, optionally until a given time.
 
 
+Insights
+--------
+
+Managers open **Microscope Issues -> Insights** for a date range (default:
+last 90 days), optionally for one instrument:
+
+* incidents per week by urgency, open issues by age, oldest open issues;
+* per instrument: incidents, booked hours (from EMhub bookings), incidents per
+  100 booked hours, unavailable hours, availability, median first response and
+  restoration, time waiting for the vendor;
+* problem areas, top symptoms, root causes, how issues were resolved and
+  recurring problems;
+* data coverage (how many incidents lack a response, a start time or a root
+  cause) and notification health.
+
+How each number is calculated is shown at the bottom of the page. In short:
+duplicates are not counted as incidents; overlapping downtime is counted once;
+restoration time is measured to when the instrument was restored, not to
+ticket closure; booked hours are not operating hours, so compare rates rather
+than raw counts between instruments.
+
+**Export CSV** downloads the issues of the period with the same visibility as
+the pages. A weekly summary can be emailed every Monday morning (set the
+recipients in **Settings**).
+
+
+Importing old logbooks
+----------------------
+
+Entries of EMhub logbooks (projects with status ``special:logbook``) can be
+imported once as historical issues:
+
+.. code-block:: bash
+
+    emh-issues import-logbooks 219,220,221,222          # dry run: report only
+    emh-issues import-logbooks 219,220,221,222 --commit
+    emh-issues import-logbooks 223 --map 223=12 --commit  # logbook without instrument
+
+Imported issues keep their original dates, are closed if the last logbook
+action is ``solved``, keep the actions as staff-only notes, never send
+notifications and are excluded from response and restoration times. Running
+the import again skips entries that were already imported. The logbooks
+themselves are not changed.
+
+
 Who can see what
 ----------------
 
