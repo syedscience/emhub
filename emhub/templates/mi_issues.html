@@ -6,9 +6,18 @@
 <div class="mi">
 <div class="wrap">
     <header class="top">
-        <p class="fac">{{ facility_name }}</p>
-        <h1>Issue log</h1>
-        <p class="sub">Every reported problem and its history. Only EMhub managers can see this page.</p>
+        <div class="tophead">
+            <div>
+                <p class="fac">{{ facility_name }}</p>
+                <h1>Issue log</h1>
+                <p class="sub">Every reported problem and its history. Only EMhub managers can see this page.</p>
+            </div>
+            <div class="actions" style="margin: 0">
+                <button type="button" class="btn-mi" data-toggle="modal" data-target="#mi-notice-modal">
+                    <i class="fas fa-bullhorn"></i> Post a notice</button>
+                <a class="btn-mi primary" href="{{ url_for_content('mi_report') }}"><i class="fas fa-plus"></i> Report an issue</a>
+            </div>
+        </div>
         {% set active = 'mi_issues' %}
         {% include 'mi_tabs.html' %}
     </header>
@@ -16,99 +25,90 @@
     <div id="mi-notices">
     {% for n in notices %}
         <div class="notice l-{{ n.level }}">
-            <div class="rail"></div>
+            <i class="fas fa-bullhorn"></i>
             <div class="nbody">
                 <div><b>{{ n.instrument_name or 'All instruments' }}</b>
                     {% if n.expires_at %}<span class="meta"> · until {{ n.expires_at|pretty_datetime }}</span>{% endif %}
                     <p class="mb-0">{{ n.message }}</p></div>
-                <div class="rowbtns"><button type="button" class="btn-mi small mi-remove-notice" data-id="{{ n.id }}">Remove</button></div>
+                <button type="button" class="btn-mi small ghost mi-remove-notice" data-id="{{ n.id }}">Remove</button>
             </div>
         </div>
     {% endfor %}
     </div>
 
     <dl class="stats">
-        <div><dt>Open issues</dt><dd>{{ stats.open }}</dd></div>
-        <div><dt>Stop now or blocked</dt><dd class="{{ 'alert-num' if stats.urgent }}">{{ stats.urgent }}</dd></div>
-        <div><dt>Waiting for a first response</dt><dd class="{{ 'alert-num' if stats.new }}">{{ stats.new }}</dd></div>
-        <div><dt>Assigned to me</dt><dd>{{ stats.mine }}</dd></div>
+        <div class="stat"><span class="ic"><i class="fas fa-inbox"></i></span>
+            <div><dt>Open issues</dt><dd>{{ stats.open }}</dd></div></div>
+        <div class="stat {{ 'red' if stats.urgent }}"><span class="ic"><i class="fas fa-exclamation-triangle"></i></span>
+            <div><dt>Stop now or blocked</dt><dd>{{ stats.urgent }}</dd></div></div>
+        <div class="stat {{ 'amber' if stats.new }}"><span class="ic"><i class="fas fa-hourglass-half"></i></span>
+            <div><dt>Waiting for a first response</dt><dd>{{ stats.new }}</dd></div></div>
+        <div class="stat"><span class="ic"><i class="fas fa-user-check"></i></span>
+            <div><dt>Assigned to me</dt><dd>{{ stats.mine }}</dd></div></div>
     </dl>
 
     <div class="insts" aria-label="Open issues per instrument">
         {% for inst in instruments %}
             {% set n = open_counts.get(inst.id, 0) %}
-            <a class="inst {{ 'urgent' if urgent_counts.get(inst.id) else ('busy' if n) }} {{ 'on' if filters.instrument_id == inst.id }}"
-               href="{{ url_for_content('mi_issues', instrument_id=inst.id, status='open') }}"
+            {% set on = filters.instrument_id == inst.id %}
+            <a class="inst {{ 'urgent' if urgent_counts.get(inst.id) else ('busy' if n) }} {{ 'on' if on }}"
+               href="{{ url_for_content('mi_issues', status=filters.status) if on else url_for_content('mi_issues', instrument_id=inst.id, status=filters.status) }}"
                title="{{ n }} open issue(s)">{{ inst.name }} <b>{{ n }}</b></a>
         {% endfor %}
     </div>
 
-    <form class="logbar" method="get" action="{{ url_for('main') }}">
-        <input type="hidden" name="content_id" value="mi_issues">
-        <div>
-            <label class="f" for="mi-filter-status">Status</label>
-            <select id="mi-filter-status" name="status">
+    <div class="tablecard">
+        <form class="toolbar" id="mi-filters" method="get" action="{{ url_for('main') }}">
+            <input type="hidden" name="content_id" value="mi_issues">
+            <input type="hidden" name="status" value="{{ filters.status }}">
+            <div class="seg" role="group" aria-label="Status">
                 {% for value, label in [('open', 'Open'), ('closed', 'Closed'), ('all', 'All')] %}
-                    <option value="{{ value }}" {{ 'selected' if filters.status == value }}>{{ label }}</option>
+                    <a href="#" data-status="{{ value }}" class="{{ 'on' if filters.status == value }}">{{ label }}</a>
                 {% endfor %}
-            </select>
-        </div>
-        <div>
-            <label class="f" for="mi-filter-instrument">Instrument</label>
-            <select id="mi-filter-instrument" name="instrument_id">
-                <option value="">All</option>
+            </div>
+            <select name="instrument_id" aria-label="Instrument">
+                <option value="">All instruments</option>
                 {% for inst in instruments %}
                     <option value="{{ inst.id }}" {{ 'selected' if filters.instrument_id == inst.id }}>{{ inst.name }}</option>
                 {% endfor %}
             </select>
-        </div>
-        <div>
-            <label class="f" for="mi-filter-assigned">Assigned</label>
-            <select id="mi-filter-assigned" name="assigned">
-                {% for value, label in [('', 'Anyone'), ('me', 'To me'), ('none', 'Nobody')] %}
+            <select name="assigned" aria-label="Assigned">
+                {% for value, label in [('', 'Assigned to anyone'), ('me', 'Assigned to me'), ('none', 'Not assigned')] %}
                     <option value="{{ value }}" {{ 'selected' if (filters.assigned or '') == value }}>{{ label }}</option>
                 {% endfor %}
             </select>
-        </div>
-        <div style="flex: 0 1 auto; min-width: 0">
-            <label class="f" style="display: flex; gap: 6px; align-items: center; margin: 0 0 10px">
-                <input type="checkbox" id="mi-filter-mine" name="mine" value="1" {{ 'checked' if filters.mine }}>
-                Only my reports</label>
-        </div>
-        <div style="flex: 0 1 auto; min-width: 0"><button type="submit" class="btn-mi primary">Filter</button></div>
-        <div class="grow">
-            <button type="button" class="btn-mi" data-toggle="modal" data-target="#mi-notice-modal">Post a service notice</button>
-        </div>
-    </form>
+            <label class="check"><input type="checkbox" name="mine" value="1" {{ 'checked' if filters.mine }}> Reported by me</label>
+            <div class="search"><i class="fas fa-search"></i>
+                <input type="text" id="mi-search" placeholder="Search tickets, problems, people" aria-label="Search"></div>
+        </form>
 
-    <div class="tablewrap">
-        <table class="mi-table" id="mi-issues-table" style="width: 100%">
+        <table class="mi-table" id="mi-issues-table">
             <thead>
                 <tr>
                     <th>Ticket</th>
-                    <th>Reported</th>
+                    <th>Problem</th>
                     <th>Instrument</th>
-                    <th>Problem area</th>
-                    <th>Summary</th>
                     <th>Urgency</th>
                     <th>Status</th>
-                    <th>Reported by</th>
+                    <th>Reported</th>
                     <th>Assigned</th>
                 </tr>
             </thead>
             <tbody>
             {% for issue in issues %}
-                <tr>
-                    <td><a href="{{ url_for_content('mi_issue', issue_id=issue.id) }}">{{ issue.ticket }}</a></td>
-                    <td data-order="{{ issue.reported_at }}">{{ issue.reported_at|pretty_datetime }}</td>
+                <tr data-href="{{ url_for_content('mi_issue', issue_id=issue.id) }}">
+                    <td class="tk"><a href="{{ url_for_content('mi_issue', issue_id=issue.id) }}">{{ issue.ticket }}</a></td>
+                    <td><div class="t-title">{{ issue.title }}</div>
+                        <div class="t-sub">{{ areas.get(issue.problem_area, issue.problem_area) }}</div></td>
                     <td>{{ issue.instrument_name }}</td>
-                    <td>{{ areas.get(issue.problem_area, issue.problem_area) }}</td>
-                    <td>{{ issue.title }}</td>
                     <td data-order="{{ severities[issue.severity].rank if issue.severity in severities else 0 }}">
                         {{ mi.severity_badge(issue.severity, severities) }}</td>
                     <td>{{ mi.status_badge(issue.status) }}</td>
-                    <td>{{ issue.reporter_name }}</td>
-                    <td>{{ issue.assignee_name or '' }}</td>
+                    <td class="when" data-order="{{ issue.reported_at }}">
+                        <div class="t-title mi-ago" data-at="{{ issue.reported_at }}" title="{{ issue.reported_at|pretty_datetime }}">{{ issue.reported_at|pretty_datetime }}</div>
+                        <div class="t-sub">{{ issue.reporter_name }}</div></td>
+                    <td>{% if issue.assignee_name %}<span class="avatar">{{ issue.assignee_name.split()|map('first')|join('')|upper|truncate(2, True, '') }}</span>{{ issue.assignee_name }}
+                        {% else %}<span class="nobody">Nobody</span>{% endif %}</td>
                 </tr>
             {% endfor %}
             </tbody>
@@ -176,10 +176,30 @@
     $('.mi-remove-notice').on('click', function () {
         MI.post('/notices/' + $(this).data('id') + '/remove', {}, miReload);
     });
-    $('#mi-issues-table').DataTable({
+    // "5 min ago", "3 h ago", "2 days ago"; the exact time is in the tooltip
+    $('.mi-ago').each(function () {
+        var t = Date.parse($(this).data('at'));
+        if (isNaN(t)) return;
+        var m = Math.max(0, Math.round((Date.now() - t) / 60000));
+        $(this).text(m < 1 ? 'Just now' : m < 60 ? m + ' min ago' : m < 1440 ? Math.round(m / 60) + ' h ago'
+                     : Math.round(m / 1440) + ' days ago');
+    });
+    var table = $('#mi-issues-table').DataTable({
         pageLength: 25,
         autoWidth: false,
-        order: [[1, "desc"]],
-        language: {emptyTable: "No issues match these filters."}
+        dom: 'rt<"tablefoot"ip>',
+        order: [[5, "desc"]],
+        language: {emptyTable: "No issues match these filters.", info: "_TOTAL_ issues",
+                   infoEmpty: "", infoFiltered: "(of _MAX_)"}
+    });
+    $('#mi-search').on('input', function () { table.search(this.value).draw(); });
+    $('#mi-issues-table tbody').on('click', 'tr[data-href]', function (e) {
+        if (!$(e.target).closest('a').length) window.location.href = $(this).data('href');
+    });
+    $('#mi-filters select, #mi-filters input[type=checkbox]').on('change', function () { $('#mi-filters').submit(); });
+    $('#mi-filters .seg a').on('click', function (e) {
+        e.preventDefault();
+        $('#mi-filters [name=status]').val($(this).data('status'));
+        $('#mi-filters').submit();
     });
 </script>

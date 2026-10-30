@@ -9,248 +9,243 @@
 <div class="mi">
 <div class="wrap">
     <header class="top">
-        <p class="fac">{{ facility_name }}</p>
-        <h1>{{ issue.ticket }}: {{ issue.title }}</h1>
-        <p class="sub">{{ issue.instrument_name }} · {{ areas.get(issue.problem_area, issue.problem_area) }} · reported by {{ issue.reporter_name }}, {{ issue.reported_at|pretty_datetime }}</p>
+        <p class="fac"><a href="{{ url_for_content('mi_issues') }}"><i class="fas fa-arrow-left"></i> Issue log</a></p>
+        <h1>{{ issue.title }}</h1>
+        <div class="badges">
+            <span class="pill st-muted" style="font-variant-numeric: tabular-nums">{{ issue.ticket }}</span>
+            {{ mi.severity_badge(issue.severity, severities) }}
+            {{ mi.status_badge(issue.status) }}
+            {% if issue.instrument_state in ['degraded', 'unavailable'] %}
+                <span class="pill stop">Instrument {{ issue.instrument_state }}</span>
+            {% endif %}
+        </div>
         {% set active = 'mi_issues' %}
         {% include 'mi_tabs.html' %}
     </header>
 
     {% if created %}
-        <div class="alert alert-success">
-            Your report <strong>{{ issue.ticket }}</strong> was saved and the facility staff have been notified.
-        </div>
+        <div class="lock"><span><b><i class="fas fa-check-circle"></i> Report {{ issue.ticket }} sent.</b>
+            Staff have been notified.</span></div>
     {% endif %}
+    {% if notices %}
+    <div id="mi-notices">
     {% for n in notices %}
-        <div class="alert alert-{{ n.level }}"><i class="fas fa-bullhorn"></i>
-            {% if n.instrument_name %}<strong>{{ n.instrument_name }}:</strong>{% endif %} {{ n.message }}</div>
+        <div class="notice l-{{ n.level }}"><i class="fas fa-bullhorn"></i>
+            <div class="nbody"><div><b>{{ n.instrument_name or 'All instruments' }}</b>
+                <p class="mb-0">{{ n.message }}</p></div></div></div>
     {% endfor %}
-    {% if issue.duplicate_of %}
-        <div class="alert alert-info">This issue is a duplicate of
-            <a href="{{ url_for_content('mi_issue', issue_id=issue.duplicate_of_id) }}">{{ issue.duplicate_of }}</a>.</div>
+    </div>
     {% endif %}
-    <div class="alert alert-danger" id="mi-page-error" style="display: none"></div>
+    {% if issue.duplicate_of %}
+        <div class="notice" style="margin-bottom: 18px"><i class="fas fa-clone"></i>
+            <div class="nbody"><div>This issue is a duplicate of
+            <a href="{{ url_for_content('mi_issue', issue_id=issue.duplicate_of_id) }}">{{ issue.duplicate_of }}</a>.</div></div></div>
+    {% endif %}
+    <p class="errs" id="mi-page-error" style="display: none; margin: 0 0 16px"></p>
 
-    <div class="row">
-        <div class="col-xl-7 col-lg-7 col-12">
-            <div class="card">
-                <div class="card-header d-flex flex-wrap align-items-center">
-                    <h5 class="mb-0 mr-3">{{ issue.instrument_name }}</h5>
-                    {{ mi.severity_badge(issue.severity, severities) }}
-                    <span class="ml-2">{{ mi.status_badge(issue.status) }}</span>
-                    {% if issue.instrument_state in ['degraded', 'unavailable'] %}
-                        <span class="badge badge-danger ml-2">Instrument {{ issue.instrument_state }}</span>
-                    {% endif %}
-                    <span class="ml-auto">
-                    {% if issue.status in ['resolved', 'closed'] %}
-                        <button class="btn btn-sm btn-outline-danger" data-toggle="modal" data-target="#mi-reopen-modal">
-                            <i class="fas fa-redo"></i> Reopen</button>
-                    {% endif %}
-                    </span>
-                </div>
-                <div class="card-body">
-                    <dl class="row mb-0">
-                        <dt class="col-sm-4">Problem area</dt>
-                        <dd class="col-sm-8">{{ areas.get(issue.problem_area, issue.problem_area) }}</dd>
-                        {% if issue.symptoms %}
-                            <dt class="col-sm-4">Symptoms</dt>
-                            <dd class="col-sm-8">{{ issue.symptoms|map(attribute='label')|join(', ') }}</dd>
-                        {% endif %}
-                        <dt class="col-sm-4">Reported</dt>
-                        <dd class="col-sm-8">{{ issue.reported_at|pretty_datetime }}
-                            {% if issue.reporter_name %} by {{ issue.reporter_name }}{% endif %}</dd>
-                        {% if issue.occurred_at %}
-                            <dt class="col-sm-4">Started</dt>
-                            <dd class="col-sm-8">{{ issue.occurred_at|pretty_datetime }}</dd>
-                        {% endif %}
-                        {% if issue.contact %}
-                            <dt class="col-sm-4">Contact</dt>
-                            <dd class="col-sm-8">{{ issue.contact }}</dd>
-                        {% endif %}
-                        <dt class="col-sm-4">Assigned to</dt>
-                        <dd class="col-sm-8">{{ issue.assignee_name or 'Nobody yet' }}</dd>
-                        {% if issue.acknowledged_at %}
-                            <dt class="col-sm-4">First response</dt>
-                            <dd class="col-sm-8">{{ issue.acknowledged_at|pretty_datetime }}</dd>
-                        {% endif %}
-                        {% if issue.affected %}
-                            <dt class="col-sm-4">Also affected</dt>
-                            <dd class="col-sm-8">{{ issue.affected|join(', ') }}</dd>
-                        {% endif %}
-                        {% for key, value in issue.context.items() %}
-                            <dt class="col-sm-4">{{ key|replace('_', ' ')|capitalize }}</dt>
-                            <dd class="col-sm-8">{{ value }}</dd>
-                        {% endfor %}
-                    </dl>
-                    {% if issue.description %}
-                        <h6 class="mt-3">Description</h6>
-                        <p style="white-space: pre-wrap">{{ issue.description }}</p>
-                    {% endif %}
-                    {% if issue.tried %}
-                        <h6>Already tried</h6>
-                        <p style="white-space: pre-wrap">{{ issue.tried }}</p>
-                    {% endif %}
-                    {% if issue.resolution and issue.resolution.resolution_type %}
-                        <div class="alert alert-success mb-0">
-                            <strong>{{ issue.resolution.resolution_type }}</strong>
-                            (root cause: {{ issue.resolution.root_cause }})
-                            {% if issue.resolution.resolution_notes %}
-                                <p class="mb-0 mt-1" style="white-space: pre-wrap">{{ issue.resolution.resolution_notes }}</p>
-                            {% endif %}
-                        </div>
-                    {% endif %}
-                </div>
-            </div>
+    <div class="issue-grid">
+        <div>
+            <section class="card-mi" style="margin-bottom: 20px">
+                <dl class="facts">
+                    <div><dt>Instrument</dt><dd>{{ issue.instrument_name }}</dd></div>
+                    <div><dt>Problem area</dt><dd>{{ areas.get(issue.problem_area, issue.problem_area) }}</dd></div>
+                    <div><dt>Reported</dt><dd>{{ issue.reported_at|pretty_datetime }}<br>
+                        <span class="text-muted">by {{ issue.reporter_name }}</span></dd></div>
+                    {% if issue.occurred_at %}<div><dt>Started</dt><dd>{{ issue.occurred_at|pretty_datetime }}</dd></div>{% endif %}
+                    {% if issue.contact %}<div><dt>Where to find them</dt><dd>{{ issue.contact }}</dd></div>{% endif %}
+                    {% if issue.acknowledged_at %}<div><dt>First response</dt><dd>{{ issue.acknowledged_at|pretty_datetime }}</dd></div>{% endif %}
+                    {% for key, value in issue.context.items() %}
+                        <div><dt>{{ key|replace('_', ' ')|capitalize }}</dt><dd>{{ value }}</dd></div>
+                    {% endfor %}
+                    {% if issue.affected %}<div><dt>Also affected</dt><dd>{{ issue.affected|join(', ') }}</dd></div>{% endif %}
+                </dl>
 
-            <div class="card">
-                <div class="card-header"><h5 class="mb-0"><i class="fas fa-paperclip"></i> Files</h5></div>
-                <div class="card-body">
-                    {% if issue.attachments %}
-                        <ul class="list-unstyled">
-                        {% for a in issue.attachments %}
-                            <li class="mb-1">
-                                <a href="{{ url_for('issues_api.get_attachment', issue_id=issue.id, attachment_id=a.id) }}" target="_blank" rel="noopener">{{ a.filename }}</a>
-                                <small class="text-muted">{{ a.size|pretty_size }}, {{ a.uploaded_by_name }}</small>
-                            </li>
-                        {% endfor %}
-                        </ul>
-                    {% endif %}
-                    <form class="form-inline" id="mi-upload-form">
-                        <input type="file" class="form-control-file mr-2 mb-2" id="mi-files" name="file" multiple
-                               accept=".png,.jpg,.jpeg,.gif,.pdf,.txt,.log,.csv,.json" style="max-width: 320px">
-                        <button type="submit" class="btn btn-sm btn-outline-primary mb-2">Upload</button>
-                    </form>
-                    <small class="text-muted">Screenshots, PDF or log files, up to 20 MB each.</small>
-                </div>
-            </div>
-        </div>
-
-        <div class="col-xl-5 col-lg-5 col-12">
-            <div class="card border-primary">
-                <div class="card-header"><h5 class="mb-0"><i class="fas fa-tools"></i> Manager actions</h5></div>
-                <div class="card-body">
-                    <div class="mb-3">
-                        {% if issue.status in ['new', 'reopened'] %}
-                            <button class="btn btn-sm btn-primary mb-1 mi-action" data-action="acknowledge">Acknowledge</button>
-                        {% endif %}
-                        {% if issue.status in ['new', 'acknowledged', 'reopened', 'waiting_vendor'] %}
-                            <button class="btn btn-sm btn-info mb-1 mi-action" data-action="investigate">Investigating</button>
-                        {% endif %}
-                        {% if issue.status in ['new', 'acknowledged', 'investigating', 'reopened'] %}
-                            <button class="btn btn-sm btn-warning mb-1" data-toggle="modal" data-target="#mi-vendor-modal">Waiting for vendor</button>
-                        {% endif %}
-                        {% if is_open %}
-                            <button class="btn btn-sm btn-success mb-1" data-toggle="modal" data-target="#mi-resolve-modal">Resolve</button>
-                            <button class="btn btn-sm btn-light mb-1" data-toggle="modal" data-target="#mi-duplicate-modal">Duplicate of...</button>
-                        {% endif %}
-                        {% if issue.status == 'resolved' %}
-                            <button class="btn btn-sm btn-secondary mb-1 mi-action" data-action="close">Close</button>
-                        {% endif %}
+                {% if issue.symptoms %}
+                    <div class="section-title">What they see</div>
+                    <div class="chips small">
+                        {% for sy in issue.symptoms %}<span class="pill st-muted">{{ sy.label }}</span>{% endfor %}
                     </div>
-                    <div class="form-row">
-                        <div class="form-group col-6">
-                            <label for="mi-assignee">Assigned to</label>
-                            <select class="form-control form-control-sm" id="mi-assignee">
-                                <option value="">Nobody</option>
-                                {% for u in managers %}
-                                    <option value="{{ u.id }}" {{ 'selected' if u.id == issue.assignee_id }}>{{ u.name }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="form-group col-6">
-                            <label for="mi-severity">Urgency</label>
-                            <select class="form-control form-control-sm" id="mi-severity">
-                                {% for sid, s in severities.items() %}
-                                    <option value="{{ sid }}" {{ 'selected' if sid == issue.severity }}>{{ s.label }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="form-group col-6">
-                            <label for="mi-state">Instrument state</label>
-                            <select class="form-control form-control-sm" id="mi-state">
-                                {% for st in ['unknown', 'operational', 'degraded', 'unavailable'] %}
-                                    <option value="{{ st }}" {{ 'selected' if st == issue.instrument_state }}>{{ st|capitalize }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="form-group col-6">
-                            <label for="mi-state-since">State since</label>
-                            <input type="datetime-local" class="form-control form-control-sm" id="mi-state-since">
-                        </div>
+                {% endif %}
+                {% if issue.description %}
+                    <div class="section-title">Description</div>
+                    <p class="prose">{{ issue.description }}</p>
+                {% endif %}
+                {% if issue.tried %}
+                    <div class="section-title">Already tried</div>
+                    <p class="prose">{{ issue.tried }}</p>
+                {% endif %}
+                {% if issue.resolution and issue.resolution.resolution_type %}
+                    <div class="resolved-box">
+                        <b><i class="fas fa-check-circle"></i> {{ issue.resolution.resolution_type }}</b>
+                        · root cause: {{ issue.resolution.root_cause }}
+                        {% if issue.resolution.resolution_notes %}<p>{{ issue.resolution.resolution_notes }}</p>{% endif %}
                     </div>
-                    <button class="btn btn-sm btn-outline-primary" id="mi-update">Save changes</button>
-                    {% if issue.downtimes %}
-                        <h6 class="mt-3">Downtime</h6>
-                        <ul class="list-unstyled mb-0 small">
-                        {% for d in issue.downtimes %}
-                            <li>{{ d.state|capitalize }}: {{ d.start|pretty_datetime }} &ndash;
-                                {{ d.end|pretty_datetime if d.end else 'now' }}</li>
-                        {% endfor %}
-                        </ul>
-                    {% endif %}
-                </div>
-            </div>
+                {% endif %}
+            </section>
 
-            <div class="card">
-                <div class="card-header"><h5 class="mb-0">History and comments</h5></div>
-                <div class="card-body">
-                    <form id="mi-comment-form" class="mb-3">
-                        <textarea class="form-control mb-2" id="mi-comment" rows="3" maxlength="5000"
-                                  placeholder="Reply to the reporter, or add an internal note"></textarea>
-                        <div class="d-flex align-items-center">
-                            <label class="custom-control custom-checkbox mb-0 mr-3">
-                                <input type="checkbox" class="custom-control-input" id="mi-comment-internal">
-                                <span class="custom-control-label">Internal note (not emailed to the reporter)</span>
-                            </label>
-                            <button type="submit" class="btn btn-sm btn-primary ml-auto">Comment</button>
-                        </div>
-                    </form>
-                    <ul class="list-unstyled mb-0">
-                        {% for e in issue.events|reverse %}
-                            <li class="mb-3 {{ 'border-left border-dark pl-2' if e.internal and e.kind == 'comment' }}">
-                                <small class="text-muted">{{ e.at|pretty_datetime }}
-                                    {% if e.internal and e.kind == 'comment' %}<span class="badge badge-dark">internal note</span>{% endif %}</small><br>
-                                {% set who = (' by ' ~ e.actor_name) if e.actor_name else '' %}
-                                {% if e.kind == 'created' %}
-                                    Reported{{ who }}
-                                    {% if e.data.bumped_from %}
-                                        <br><small class="text-muted">Urgency raised from
-                                        {{ severities[e.data.bumped_from].label if e.data.bumped_from in severities else e.data.bumped_from }}
-                                        by the problem type.</small>
-                                    {% endif %}
-                                {% elif e.kind == 'comment' %}
-                                    <strong>{{ e.actor_name or 'A user' }}</strong>
-                                    <div style="white-space: pre-wrap">{{ e.data.text }}</div>
-                                {% elif e.kind == 'updated' %}
-                                    Updated{{ who }}:
-                                    {% for field, change in e.data.changes.items() %}
-                                        {{ field|replace('_', ' ') }} {{ change[0] or '-' }} &rarr; {{ change[1] or '-' }}{{ ',' if not loop.last }}
-                                    {% endfor %}
-                                {% elif e.kind == 'escalated' %}
-                                    <span class="text-danger">Not acknowledged after {{ e.data.after_minutes }} min{{
-                                        ': escalation contacts alerted' if e.data.contacts else ' (no escalation contacts configured)' }}.</span>
-                                {% elif e.kind == 'reopen' %}
-                                    Reopened{{ who }}: {{ e.data.reason }}
-                                {% elif e.kind == 'resolve' %}
-                                    Resolved{{ who }}
-                                {% elif e.kind == 'duplicate' %}
-                                    Marked as duplicate of {{ e.data.duplicate_of }}{{ who }}
-                                {% elif e.kind == 'duplicate_merged' %}
-                                    {{ e.data.ticket }} ({{ e.data.reporter }}) was merged into this issue{{ who }}
-                                {% elif e.kind == 'attachment' %}
-                                    File {{ e.data.filename }} added{{ who }}
-                                {% elif e.kind == 'waiting_vendor' %}
-                                    Waiting for vendor{{ ' (' ~ e.data.vendor_ref ~ ')' if e.data.vendor_ref }}{{ who }}
-                                {% else %}
-                                    {{ {'acknowledge': 'Acknowledged', 'investigate': 'Investigating',
-                                        'close': 'Closed'}.get(e.kind, e.kind|replace('_', ' ')|capitalize) }}{{ who }}
-                                {% endif %}
-                            </li>
-                        {% endfor %}
+            <section class="card-mi" style="margin-bottom: 20px">
+                <h2 style="margin-bottom: 12px">Files</h2>
+                {% if issue.attachments %}
+                    <ul class="files">
+                    {% for a in issue.attachments %}
+                        <li><i class="fas fa-paperclip"></i>
+                            <a href="{{ url_for('issues_api.get_attachment', issue_id=issue.id, attachment_id=a.id) }}" target="_blank" rel="noopener">{{ a.filename }}</a>
+                            <small>{{ a.size|pretty_size }} · {{ a.uploaded_by_name }}</small></li>
+                    {% endfor %}
                     </ul>
-                </div>
-            </div>
+                {% endif %}
+                <form id="mi-upload-form">
+                    <label class="drop" for="mi-files">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                        <span><b>Add files</b><br>Click to choose screenshots, PDF or log files, up to 20 MB each.</span>
+                        <input type="file" id="mi-files" name="file" multiple accept=".png,.jpg,.jpeg,.gif,.pdf,.txt,.log,.csv,.json">
+                    </label>
+                </form>
+            </section>
+
+            <section class="card-mi">
+                <h2 style="margin-bottom: 14px">Activity</h2>
+                <form id="mi-comment-form" class="composer">
+                    <textarea id="mi-comment" maxlength="5000" placeholder="Write a reply to the reporter, or an internal note for managers"></textarea>
+                    <div class="bar">
+                        <label class="check"><input type="checkbox" id="mi-comment-internal"> Internal note (not emailed to the reporter)</label>
+                        <button type="submit" class="btn-mi primary small"><i class="fas fa-paper-plane"></i> Post</button>
+                    </div>
+                </form>
+                <ul class="timeline">
+                    {% for e in issue.events|reverse %}
+                        {% set who = (' by ' ~ e.actor_name) if e.actor_name else '' %}
+                        {% set note = e.internal and e.kind == 'comment' %}
+                        {% set cls = 'ev-note' if note else ('ev-comment' if e.kind == 'comment' else
+                                     ('ev-bad' if e.kind in ['escalated', 'reopen'] else
+                                     ('ev-good' if e.kind in ['resolve', 'close'] else ''))) %}
+                        {% set icon = {'comment': 'fa-comment', 'created': 'fa-flag', 'resolve': 'fa-check', 'close': 'fa-check',
+                                       'escalated': 'fa-bell', 'reopen': 'fa-redo', 'attachment': 'fa-paperclip',
+                                       'updated': 'fa-pen', 'duplicate': 'fa-clone', 'waiting_vendor': 'fa-truck',
+                                       'acknowledge': 'fa-eye', 'investigate': 'fa-search'}.get(e.kind, 'fa-circle') %}
+                        <li class="{{ cls }}">
+                            <span class="tdot"><i class="fas {{ 'fa-lock' if note else icon }}"></i></span>
+                            <div class="when">{{ e.at|pretty_datetime }}{% if note %} · internal note{% endif %}</div>
+                            <div class="what">
+                            {% if e.kind == 'created' %}
+                                Reported{{ who }}
+                                {% if e.data.bumped_from %}
+                                    <span class="text-muted">· urgency raised from
+                                    {{ severities[e.data.bumped_from].label if e.data.bumped_from in severities else e.data.bumped_from }}
+                                    by the problem type</span>
+                                {% endif %}
+                            {% elif e.kind == 'comment' %}
+                                <b>{{ e.actor_name or 'A user' }}</b>
+                                <div class="bubble">{{ e.data.text }}</div>
+                            {% elif e.kind == 'updated' %}
+                                Updated{{ who }}:
+                                {% for field, change in e.data.changes.items() %}
+                                    {{ field|replace('_', ' ') }} {{ change[0] or '-' }} &rarr; {{ change[1] or '-' }}{{ ',' if not loop.last }}
+                                {% endfor %}
+                            {% elif e.kind == 'escalated' %}
+                                Not acknowledged after {{ e.data.after_minutes }} min{{
+                                    ': escalation contacts alerted' if e.data.contacts else ' (no escalation contacts configured)' }}.
+                            {% elif e.kind == 'reopen' %}
+                                Reopened{{ who }}: {{ e.data.reason }}
+                            {% elif e.kind == 'resolve' %}
+                                Resolved{{ who }}
+                            {% elif e.kind == 'duplicate' %}
+                                Marked as duplicate of {{ e.data.duplicate_of }}{{ who }}
+                            {% elif e.kind == 'duplicate_merged' %}
+                                {{ e.data.ticket }} ({{ e.data.reporter }}) was merged into this issue{{ who }}
+                            {% elif e.kind == 'attachment' %}
+                                File {{ e.data.filename }} added{{ who }}
+                            {% elif e.kind == 'waiting_vendor' %}
+                                Waiting for vendor{{ ' (' ~ e.data.vendor_ref ~ ')' if e.data.vendor_ref }}{{ who }}
+                            {% else %}
+                                {{ {'acknowledge': 'Acknowledged', 'investigate': 'Investigating',
+                                    'close': 'Closed'}.get(e.kind, e.kind|replace('_', ' ')|capitalize) }}{{ who }}
+                            {% endif %}
+                            </div>
+                        </li>
+                    {% endfor %}
+                </ul>
+            </section>
         </div>
+
+        <aside class="side" style="top: 80px">
+            <section class="card-mi">
+                <h2 style="margin-bottom: 6px">Status</h2>
+                {% set flow = [('new', 'New'), ('acknowledged', 'Seen'), ('investigating', 'Working'), ('resolved', 'Resolved'), ('closed', 'Closed')] %}
+                {% set order = {'new': 0, 'reopened': 0, 'acknowledged': 1, 'investigating': 2, 'waiting_vendor': 2,
+                                'resolved': 3, 'closed': 4, 'duplicate': 4} %}
+                {% set pos = order.get(issue.status, 0) %}
+                <div class="statusflow">
+                    {% for key, label in flow %}
+                        <span class="{{ 'now' if loop.index0 == pos else ('done' if loop.index0 < pos) }}">{{ label }}</span>
+                    {% endfor %}
+                </div>
+                <div class="actgrid">
+                    {% if issue.status in ['new', 'reopened'] %}
+                        <button class="btn-mi primary mi-action" data-action="acknowledge"><i class="fas fa-eye"></i> Acknowledge</button>
+                    {% endif %}
+                    {% if issue.status in ['new', 'acknowledged', 'reopened', 'waiting_vendor'] %}
+                        <button class="btn-mi {{ 'primary' if issue.status in ['acknowledged', 'waiting_vendor'] }} mi-action" data-action="investigate"><i class="fas fa-search"></i> Working on it</button>
+                    {% endif %}
+                    {% if is_open %}
+                        <button class="btn-mi {{ 'primary' if issue.status == 'investigating' }}" data-toggle="modal" data-target="#mi-resolve-modal"><i class="fas fa-check"></i> Resolve</button>
+                    {% endif %}
+                    {% if issue.status in ['new', 'acknowledged', 'investigating', 'reopened'] %}
+                        <button class="btn-mi" data-toggle="modal" data-target="#mi-vendor-modal"><i class="fas fa-truck"></i> Waiting for vendor</button>
+                    {% endif %}
+                    {% if is_open %}
+                        <button class="btn-mi ghost" data-toggle="modal" data-target="#mi-duplicate-modal"><i class="fas fa-clone"></i> Duplicate of another issue</button>
+                    {% endif %}
+                    {% if issue.status == 'resolved' %}
+                        <button class="btn-mi primary mi-action" data-action="close"><i class="fas fa-archive"></i> Close</button>
+                    {% endif %}
+                    {% if issue.status in ['resolved', 'closed'] %}
+                        <button class="btn-mi danger" data-toggle="modal" data-target="#mi-reopen-modal"><i class="fas fa-redo"></i> Reopen</button>
+                    {% endif %}
+                </div>
+            </section>
+
+            <section class="card-mi">
+                <h2 style="margin-bottom: 14px">Details</h2>
+                <div class="frow one" style="margin-bottom: 12px">
+                    <div><label class="f" for="mi-assignee">Assigned to</label>
+                        <select id="mi-assignee">
+                            <option value="">Nobody</option>
+                            {% for u in managers %}
+                                <option value="{{ u.id }}" {{ 'selected' if u.id == issue.assignee_id }}>{{ u.name }}</option>
+                            {% endfor %}
+                        </select></div>
+                </div>
+                <div class="frow" style="margin-bottom: 12px">
+                    <div><label class="f" for="mi-severity">Urgency</label>
+                        <select id="mi-severity">
+                            {% for sid, s in severities.items() %}
+                                <option value="{{ sid }}" {{ 'selected' if sid == issue.severity }}>{{ s.label }}</option>
+                            {% endfor %}
+                        </select></div>
+                    <div><label class="f" for="mi-state">Instrument</label>
+                        <select id="mi-state">
+                            {% for st, label in [('unknown', 'Unknown'), ('operational', 'Working'), ('degraded', 'Degraded'), ('unavailable', 'Down')] %}
+                                <option value="{{ st }}" {{ 'selected' if st == issue.instrument_state }}>{{ label }}</option>
+                            {% endfor %}
+                        </select></div>
+                </div>
+                <div class="frow one" id="mi-since-row" style="margin-bottom: 14px">
+                    <div><label class="f" for="mi-state-since">Since <span class="opt">optional, defaults to now</span></label>
+                        <input type="datetime-local" id="mi-state-since"></div>
+                </div>
+                <button class="btn-mi primary" id="mi-update" style="width: 100%">Save details</button>
+                {% if issue.downtimes %}
+                    <div class="section-title">Downtime</div>
+                    <ul class="files">
+                    {% for d in issue.downtimes %}
+                        <li><i class="fas fa-power-off"></i> {{ d.state|capitalize }}
+                            <small>{{ d.start|pretty_datetime }} &ndash; {{ d.end|pretty_datetime if d.end else 'now' }}</small></li>
+                    {% endfor %}
+                    </ul>
+                {% endif %}
+            </section>
+        </aside>
     </div>
 </div>
 
@@ -379,6 +374,7 @@
                 reload, '#mi-page-error');
     });
 
+    $('#mi-files').on('change', function () { $('#mi-upload-form').submit(); });
     $('#mi-upload-form').on('submit', function (e) {
         e.preventDefault();
         var files = $('#mi-files')[0].files;

@@ -424,7 +424,7 @@ class TestIssues(unittest.TestCase):
 
         status, html = self.content(self.manager, content_id='mi_issue', issue_id=str(issue['id']))
         self.assertIn(issue['ticket'], html)
-        self.assertIn('Manager actions', html)
+        self.assertIn('data-action="acknowledge"', html)
 
     # ------------------------- workflow --------------------------------------
     def act(self, user, issue, action, **extra):

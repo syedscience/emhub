@@ -1,6 +1,6 @@
 {# Shared pills for the Microscope Issues pages #}
 {% set MI_STATUS_CLASS = {'new': 'st-new', 'acknowledged': 'st-open', 'investigating': 'st-open',
-                          'waiting_vendor': 'st-open', 'reopened': 'st-new', 'resolved': 'st-done',
+                          'waiting_vendor': 'st-wait', 'reopened': 'st-new', 'resolved': 'st-done',
                           'closed': 'st-done', 'duplicate': 'st-muted'} %}
 
 {% macro severity_badge(severity, severities) -%}
