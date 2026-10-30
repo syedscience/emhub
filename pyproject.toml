@@ -41,6 +41,8 @@ emh-issues = "emhub.issues.__main__:main"
 [project.optional-dependencies]
 # MCP server (emh-mcp), see emhub/mcp/README.rst
 mcp = ["mcp>=1.20"]
+# QR codes of the Microscope Issues module (Instrument Help)
+issues = ["segno>=1.6"]
 
 [tool.setuptools]
 # Templates and static files are included via MANIFEST.in

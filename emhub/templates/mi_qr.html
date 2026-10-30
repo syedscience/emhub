@@ -1,0 +1,62 @@
+{% include "mi_common.html" %}
+{% include "mi_style.html" %}
+
+<div class="mi">
+<div class="wrap">
+    <header class="top no-print">
+        <div class="tophead">
+            <div>
+                <p class="fac">{{ facility_name }}</p>
+                <h1>QR codes for the instruments</h1>
+                <p class="sub">Print and stick one on each instrument. Scanning it opens Instrument Help with that
+                    instrument already chosen.</p>
+            </div>
+            {% if qr_available %}
+                <button type="button" class="btn-mi primary" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
+            {% endif %}
+        </div>
+        {% set active = 'mi_settings' %}
+        {% include 'mi_tabs.html' %}
+    </header>
+
+    {% if not qr_available %}
+        <p class="empty-note">QR codes need the <code>segno</code> package on the server
+            (<code>pip install emhub[issues]</code>). The links below work without it.</p>
+    {% endif %}
+    {% if base_url.startswith('http://127.') or base_url.startswith('http://localhost') %}
+        <p class="empty-note no-print" style="margin-bottom: 16px"><i class="fas fa-exclamation-triangle"></i>
+            These codes point to <b>{{ base_url }}</b>, which phones cannot open. Set
+            <code>ISSUES_BASE_URL</code> in the instance config.py to EMhub's public address before printing.</p>
+    {% endif %}
+
+    <div class="qr-sheet">
+        {% for l in labels %}
+            <div class="qr-label">
+                <div class="qr-top"><i class="fas fa-life-ring"></i> Instrument Help</div>
+                <div class="qr-name">{{ l.name }}</div>
+                <div class="qr-code">{{ l.svg|safe }}</div>
+                <div class="qr-hint">Problem with this instrument?<br>Scan with your phone camera.</div>
+                <div class="qr-url no-print">{{ l.url }}</div>
+            </div>
+        {% endfor %}
+    </div>
+</div>
+</div>
+
+<style>
+.mi .qr-sheet{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:16px}
+.mi .qr-label{background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--radius);padding:16px;text-align:center;break-inside:avoid}
+.mi .qr-top{font-size:13px;font-weight:600;color:var(--primary);text-transform:uppercase;letter-spacing:.05em}
+.mi .qr-name{font-size:22px;font-weight:700;color:var(--ink);margin:4px 0 6px}
+.mi .qr-code svg{width:170px;height:170px}
+.mi .qr-hint{font-size:13.5px;color:var(--ink-2);margin-top:6px}
+.mi .qr-url{font-size:11px;color:var(--muted);margin-top:8px;overflow-wrap:anywhere}
+@media print {
+    .nav-left-sidebar, .dashboard-header, .footer, .no-print { display: none !important; }
+    .dashboard-wrapper { margin: 0 !important; padding: 0 !important; }
+    .dashboard-main-wrapper { padding: 0 !important; }
+    body, .mi { background: #fff !important; }
+    .mi .qr-sheet { grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .mi .qr-label { border: 1px dashed #999; border-radius: 6px; }
+}
+</style>

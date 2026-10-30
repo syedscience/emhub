@@ -1,0 +1,71 @@
+{% include "mi_common.html" %}
+{% include "mi_style.html" %}
+{% include "mi_app_tags.html" %}
+
+<div class="mi">
+<div class="wrap narrow">
+    <header class="top">
+        <p class="fac">{{ facility_name }}</p>
+        <h1>Add photos to {{ issue.ticket }}</h1>
+        <p class="sub">{{ issue.instrument_name }} · {{ issue.area_label }}{% if issue.symptoms %}: {{ issue.symptoms|join(', ') }}{% endif %}</p>
+    </header>
+
+    <section class="card-mi">
+        {% if issue.is_open %}
+            <div class="photo-buttons">
+                <label class="btn-mi primary big" for="mi-camera">
+                    <i class="fas fa-camera"></i> Take a photo</label>
+                <input type="file" id="mi-camera" accept="image/*" capture="environment" hidden>
+                <label class="btn-mi big" for="mi-pick">
+                    <i class="fas fa-images"></i> Choose photos or files</label>
+                <input type="file" id="mi-pick" multiple accept="image/*,.pdf,.txt,.log,.csv,.json" hidden>
+            </div>
+            <p class="meta" style="margin: 12px 0 0">Photos are sent to staff as soon as you choose them. Up to 20 MB each.</p>
+        {% else %}
+            <p class="empty-note">This issue is closed, so no more files can be added. If the problem is back,
+                <a href="{{ url_for_content('mi_report') }}">report it again</a>.</p>
+        {% endif %}
+        <p class="errs" id="mi-photo-error" role="alert" style="display: none"></p>
+    </section>
+
+    <section class="card-mi">
+        <h2 style="margin-bottom: 10px">Sent to staff</h2>
+        <ul class="filelist" id="mi-sent">
+            {% for f in issue.files %}<li><i class="fas fa-check-circle"></i><span>{{ f }}</span></li>{% endfor %}
+        </ul>
+        <p class="meta" id="mi-none" {% if issue.files %}style="display: none"{% endif %}>Nothing yet.</p>
+    </section>
+</div>
+</div>
+
+<script>
+(function () {
+    var ISSUE_ID = {{ issue.id|tojson }};
+
+    function upload(files) {
+        if (!files.length) return;
+        $('#mi-photo-error').hide();
+        var list = $('#mi-sent'), rows = [];
+        for (var i = 0; i < files.length; i++) {
+            rows.push($('<li class="sending">').append('<i class="fas fa-spinner fa-spin"></i>',
+                $('<span>').text(files[i].name + ' (sending...)')).appendTo(list));
+        }
+        $('#mi-none').hide();
+        var form = new FormData();
+        for (var j = 0; j < files.length; j++) form.append('file', files[j]);
+        MI.post('/issues/' + ISSUE_ID + '/attachments', form, function () {
+            rows.forEach(function (row, k) {
+                row.removeClass('sending').empty().append('<i class="fas fa-check-circle"></i>',
+                    $('<span>').text(files[k].name));
+            });
+        }, '#mi-photo-error').fail(function () {
+            rows.forEach(function (row) { row.remove(); });
+        });
+    }
+
+    $('#mi-camera, #mi-pick').on('change', function () {
+        upload(Array.prototype.slice.call(this.files));
+        this.value = '';  // the same photo can be chosen again
+    });
+})();
+</script>

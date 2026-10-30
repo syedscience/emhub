@@ -15,23 +15,43 @@ The module is optional and disabled by default.
 Reporting an issue
 ------------------
 
-1. Open **Instrument Help** (managers: click **Report an issue**), or use a link that
-   preselects an instrument: ``/main?content_id=mi_report&resource_id=<id>``
-   (useful for QR codes placed next to each instrument).
-2. Select the instrument, fill in the session details (detector, acquisition
-   software, session type, session status, when it started) and choose the
-   problem area. Only problem areas for that instrument are listed (for
-   example, cryo-FIB problems are not offered for a TEM).
-3. Tick the symptoms you see. A **While you wait** panel shows what to do now,
-   checks you can safely make, what to avoid and what to include in the report.
-4. Choose how urgent the problem is. Some problems (for example vacuum or LN2
-   alarms) are always treated as urgent, and the form says so when it raises
-   the urgency.
-5. Click **Send to staff**. The report gets a ticket number (``MI-2026-0042``),
-   shown on the page, and the facility staff are notified. Screenshots, PDF or
-   log files (up to 20 MB) can be sent with the report.
+1. Open **Instrument Help** (managers: click **Report an issue**), or scan the
+   QR code on the instrument. The form opens with your name, PI and email from
+   your EMhub login, and with your EMhub booking or running session on now,
+   which also chooses the instrument.
+2. If no instrument is chosen yet, pick it. Session details (session status,
+   when it started, software...) are optional and folded away; a booking on
+   now fills in *Running*.
+3. Open issues on that instrument are listed first. If yours is one of them,
+   click **I have this too**: staff see that it affects you and you get its
+   updates, with nothing else to fill in.
+4. Otherwise choose the problem area and tick the symptoms you see. Only the
+   problems that instrument can have are listed (a plunge freezer gets
+   blotting and humidity, not beam or vacuum). A **While you wait** panel shows
+   what to do now, checks you can safely make, what to avoid and what to note.
+5. An urgency is suggested for the problem; change it if needed. Some problems
+   (for example vacuum or LN2 alarms) are always treated as urgent.
+6. Click **Send to staff**. The report gets a ticket number (``MI-2026-0042``)
+   and the facility staff are notified. Screenshots, PDF or log files (up to
+   20 MB) can be sent with the report; on a phone, **Take a photo** opens the
+   camera.
 
-Your name and email come from your EMhub login; they are never typed in.
+After sending, a QR code lets you add photos from your phone to the report
+(for example a photo of the error on the instrument screen). Only the
+reporter can add files this way.
+
+QR codes and phones
+~~~~~~~~~~~~~~~~~~~
+
+Managers print one QR code per instrument from **Settings -> Print QR codes**.
+Scanning it opens Instrument Help with that instrument chosen
+(``/main?content_id=mi_report&resource_id=<id>``). The codes use
+``ISSUES_BASE_URL`` from the instance ``config.py``, which must be an address
+phones can open. QR codes need the optional ``segno`` package
+(``pip install emhub[issues]``); without it the page lists the links.
+
+On a phone, Instrument Help can be added to the home screen (Safari: **Share
+-> Add to Home Screen**) and then opens like an app, with its own icon.
 
 
 Following an issue

@@ -1,5 +1,6 @@
 {% include "mi_common.html" %}
 {% include "mi_style.html" %}
+{% include "mi_app_tags.html" %}
 
 <div class="mi">
 <div class="wrap">
@@ -18,6 +19,13 @@
         {% set active = 'mi_report' %}
         {% include 'mi_tabs.html' %}
     </header>
+
+    <p class="home-tip" id="mi-home-tip" style="display: none">
+        <i class="fas fa-mobile-alt"></i>
+        <span>Tip: add Instrument Help to your home screen to open it like an app.
+            <span id="mi-home-how"></span></span>
+        <button type="button" class="btn-mi ghost small" id="mi-home-close" aria-label="Hide this tip">&times;</button>
+    </p>
 
     <div id="mi-notices"></div>
 
@@ -117,6 +125,9 @@
                             <div class="ferr" data-for="title"></div>
                         </div>
                     </div>
+                    <label class="btn-mi primary camera-btn" for="mi-camera" id="mi-camera-btn" style="display: none">
+                        <i class="fas fa-camera"></i> Take a photo</label>
+                    <input type="file" id="mi-camera" accept="image/*" capture="environment" hidden>
                     <label class="drop" id="mi-drop" for="mi-files">
                         <i class="fas fa-cloud-upload-alt"></i>
                         <span><b>Add screenshots or log files</b><br>Click or drop files here. Images, PDF or text, up to 20 MB each.</span>
@@ -172,6 +183,14 @@
                 <p class="foot" style="margin: 0">Once you choose a problem area, safe checks you can do while you wait appear here.</p>
             </section>
 
+            <section class="card-mi" id="mi-phone" style="display: none">
+                <h2 style="margin-bottom: 6px"><i class="fas fa-camera"></i> Add photos from your phone</h2>
+                <p class="meta">Scan this with your phone camera to send photos of the screen or the instrument
+                    to this report.</p>
+                <div class="phone-qr" id="mi-phone-qr"></div>
+                <a class="btn-mi primary big" id="mi-phone-link" style="display: none"><i class="fas fa-camera"></i> Add photos</a>
+            </section>
+
             <aside class="panel" id="mi-panel" aria-live="polite" aria-label="Troubleshooting while you wait" style="display: none"></aside>
         </aside>
     </main>
@@ -208,6 +227,8 @@
     var instOpen = false;   // instrument tiles shown although one is chosen
     var sevPicked = false;  // urgency chosen by the user (not the suggestion)
     var sessionOpen = false, openRequest = 0;
+    var pending = [];       // files to send with the report
+    var PHONE = window.matchMedia && matchMedia('(pointer: coarse)').matches;
     // One key per form load, so double clicks or retries create one issue
     var idempotencyKey = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
         : String(Date.now()) + Math.random().toString(16).slice(2);
@@ -620,6 +641,22 @@
         panel.html(html + '</div>');
     }
 
+    // On a phone browser (not already opened from the home screen), say how to add it once
+    function homeTip() {
+        var standalone = window.navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+        var hidden = false;
+        try { hidden = localStorage.getItem('mi-home-tip') === 'off'; } catch (e) { /* private mode */ }
+        if (!PHONE || standalone || hidden) return;
+        var ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+        $('#mi-home-how').html(ios ? 'Tap <b>Share</b>, then <b>Add to Home Screen</b>.'
+                                   : 'Open the browser menu, then <b>Add to Home screen</b>.');
+        $('#mi-home-tip').show();
+        $('#mi-home-close').on('click', function () {
+            $('#mi-home-tip').hide();
+            try { localStorage.setItem('mi-home-tip', 'off'); } catch (e) { /* private mode */ }
+        });
+    }
+
     function tickedText() {
         var lines = [];
         $('#mi-panel input[data-step]:checked').each(function () { lines.push('- ' + $(this).data('text')); });
@@ -627,11 +664,34 @@
     }
 
     // ---------------- Files ----------------
+    function addFiles(list) {
+        for (var i = 0; i < list.length; i++) pending.push(list[i]);
+        renderFiles();
+    }
+
     function renderFiles() {
-        var ul = $('#mi-filelist').empty(), files = $('#mi-files')[0].files;
-        for (var i = 0; i < files.length; i++) {
-            ul.append($('<li>').append('<i class="fas fa-paperclip"></i>', $('<span>').text(files[i].name)));
-        }
+        var ul = $('#mi-filelist').empty();
+        pending.forEach(function (f, i) {
+            ul.append($('<li>').append('<i class="fas fa-paperclip"></i>', $('<span>').text(f.name),
+                $('<button type="button" class="btn-mi ghost small remove">').attr('data-i', i)
+                    .attr('aria-label', 'Remove ' + f.name).html('&times;')));
+        });
+    }
+
+    // After sending: a QR code to add photos from a phone (or a button, on a phone)
+    function showPhoneLink(issueId) {
+        $.getJSON(MI.api + '/issues/' + issueId + '/photo_link').done(function (data) {
+            if (PHONE) {
+                $('#mi-phone-qr').hide();
+                $('#mi-phone .meta').text('Send photos of the screen or the instrument to this report.');
+                $('#mi-phone-link').attr('href', data.url).show();
+            } else if (data.svg) {
+                $('#mi-phone-qr').html(data.svg);
+            } else {
+                $('#mi-phone-link').attr('href', data.url).text('Open the photo page').show();
+            }
+            $('#mi-phone').show();
+        });
     }
 
     // ---------------- Submit ----------------
@@ -668,6 +728,7 @@
         $('#mi-lock').show();
         window.scrollTo(0, 0);
         renderPanel();
+        showPhoneLink(issue.id);
         setInterval(function () {
             $('#mi-clock').text(fmtClock(Math.max(0, Math.floor((Date.now() - sent.at) / 1000))));
         }, 1000);
@@ -706,7 +767,7 @@
             headers: {'X-MI-CSRF': CSRF}
         }).done(function (data) {
             showErrors({}, null);
-            var files = $('#mi-files')[0].files;
+            var files = pending;
             if (!files.length) return markSent(data.issue, severity);
             // The report is saved; files are added to it. A failed upload
             // does not lose the report.
@@ -789,14 +850,22 @@
         $('#mi-panel').on('change', 'input[data-step]', function () {
             ticked[$(this).data('step')] = this.checked;
         });
-        $('#mi-files').on('change', renderFiles);
+        $('#mi-files, #mi-camera').on('change', function () {
+            addFiles(this.files);
+            this.value = '';  // the same file can be added again
+        });
+        $('#mi-filelist').on('click', '.remove', function () {
+            pending.splice(parseInt($(this).data('i')), 1);
+            renderFiles();
+        });
+        $('#mi-camera-btn').toggle(PHONE);
+        homeTip();
         $('#mi-drop').on('dragover', function (e) { e.preventDefault(); $(this).addClass('over'); })
             .on('dragleave', function () { $(this).removeClass('over'); })
             .on('drop', function (e) {
                 e.preventDefault();
                 $(this).removeClass('over');
-                $('#mi-files')[0].files = e.originalEvent.dataTransfer.files;
-                renderFiles();
+                addFiles(e.originalEvent.dataTransfer.files);
             });
         $('#mi-reset').on('click', function () {
             $('#mi-report-form')[0].reset();
@@ -805,6 +874,7 @@
             $('#mi-booking').val('');
             instOpen = sevPicked = sessionOpen = false;
             ticked = {};
+            pending = [];
             showErrors({}, null);
             $('#mi-occurred-row').hide();
             renderFiles();

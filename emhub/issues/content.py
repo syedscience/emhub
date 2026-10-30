@@ -30,12 +30,15 @@ EMhub pages (content_id -> template) of the Microscope Issues module:
     mi_insights  Insights (managers): trends, response, downtime, backlog
     mi_settings  Admin settings: notifications, instruments, delivery health
     mi_catalog   Problem areas, symptoms and waiting advice (managers)
+    mi_add_photos  Add photos to one's own report, from a phone (QR code)
+    mi_qr        Printable QR codes, one per instrument (managers)
 """
 
 import datetime as dt
 
 import flask_login
 
+from . import qr
 from .api import csrf_token
 from .authz import MANAGER, ADMIN, require
 
@@ -176,6 +179,33 @@ def register_content(dc):
         return {
             **_page(svc),
             'selected_area': str(kwargs.get('area') or ''),
+            'csrf_token': csrf_token(),
+        }
+
+    @dc.content
+    def mi_add_photos(**kwargs):
+        svc = _svc()
+        return {
+            **_page(svc),
+            'issue': svc.own_issue(kwargs.get('issue_id')),
+            'csrf_token': csrf_token(),
+        }
+
+    @dc.content
+    def mi_qr(**kwargs):
+        svc = _svc()
+        require(svc.roles(), MANAGER)
+        base = qr.base_url(dc.app)
+        labels = []
+        for inst in svc.instruments():
+            url = f'{base}/main?content_id=mi_report&resource_id={inst.id}'
+            labels.append({'name': inst.name, 'url': url,
+                           'svg': qr.svg(url, scale=5, title=f'Instrument Help: {inst.name}')})
+        return {
+            **_page(svc),
+            'labels': labels,
+            'qr_available': qr.available(),
+            'base_url': base,
             'csrf_token': csrf_token(),
         }
 

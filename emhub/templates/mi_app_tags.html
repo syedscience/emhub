@@ -1,0 +1,21 @@
+{# "Add to Home Screen" support: the pages are loaded into EMhub's main page,
+   so the icon, title and manifest are added to its head from here #}
+<script>
+(function () {
+    if (document.querySelector('[data-mi-app]')) return;
+    var tags = [
+        ['link', {rel: 'manifest', href: "{{ url_for('static', filename='mi/manifest.webmanifest') }}"}],
+        ['link', {rel: 'apple-touch-icon', href: "{{ url_for('static', filename='mi/icon-180.png') }}"}],
+        ['meta', {name: 'apple-mobile-web-app-capable', content: 'yes'}],
+        ['meta', {name: 'mobile-web-app-capable', content: 'yes'}],
+        ['meta', {name: 'apple-mobile-web-app-title', content: 'Instrument Help'}],
+        ['meta', {name: 'theme-color', content: '#0E7C7B'}]
+    ];
+    tags.forEach(function (t) {
+        var el = document.createElement(t[0]);
+        Object.keys(t[1]).forEach(function (k) { el.setAttribute(k, t[1][k]); });
+        el.setAttribute('data-mi-app', '1');
+        document.head.appendChild(el);
+    });
+})();
+</script>

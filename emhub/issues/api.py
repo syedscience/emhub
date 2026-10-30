@@ -204,6 +204,17 @@ def open_on_instrument(instrument_id):
     return flask.jsonify({'issues': _service().open_on_instrument(instrument_id)})
 
 
+@issues_bp.route('/issues/<int:issue_id>/photo_link', methods=['GET'])
+def photo_link(issue_id):
+    """ Link and QR code to add photos to one's own report from a phone. """
+    from . import qr
+    svc = _service()
+    svc.own_issue(issue_id)  # reporters only get links to their own reports
+    url = (qr.base_url(flask.current_app) +
+           f'/main?content_id=mi_add_photos&issue_id={issue_id}')
+    return flask.jsonify({'url': url, 'svg': qr.svg(url, scale=4, title='Add photos')})
+
+
 @issues_bp.route('/issues/<int:issue_id>/join', methods=['POST'])
 def join_issue(issue_id):
     """ 'I have this too' from the report form. """

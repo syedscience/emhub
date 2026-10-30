@@ -226,6 +226,44 @@ class TestIssues(unittest.TestCase):
         other = self.get_issue(r.get_json()['issue']['id'])
         self.assertNotIn('booking_id', other['context'])
 
+    def test_photos_from_a_phone(self):
+        issue = self.new_issue()
+        rc = self.client_for(self.reporter)
+        r = rc.get('/api/mi/issues/%d/photo_link' % issue['id'])
+        self.assertEqual(r.status_code, 200, r.get_json())
+        link = r.get_json()
+        self.assertTrue(link['url'].startswith('https://emhub.example.org/main?content_id=mi_add_photos'))
+        # Only the reporter (or a manager) gets the link and the page
+        self.assertEqual(self.client_for(self.other).get(
+            '/api/mi/issues/%d/photo_link' % issue['id']).status_code, 403)
+        status, html = self.content(self.other, content_id='mi_add_photos', issue_id=str(issue['id']))
+        self.assertIn('error-modal-title', html)
+        status, html = self.content(self.reporter, content_id='mi_add_photos', issue_id=str(issue['id']))
+        self.assertIn('Add photos to ' + issue['ticket'], html)
+        self.assertIn('capture="environment"', html)
+
+        url = '/api/mi/issues/%d/attachments' % issue['id']
+        png = b'\x89PNG\r\n\x1a\n' + b'0' * 64
+        r = rc.post(url, data={'file': (io.BytesIO(png), 'screen.png')},
+                    headers={'X-MI-CSRF': 'token-%d' % self.reporter.id})
+        self.assertEqual(r.status_code, 201, r.get_json())
+        status, html = self.content(self.reporter, content_id='mi_add_photos', issue_id=str(issue['id']))
+        self.assertIn('screen.png', html)
+        r = rc.post(url, data={'file': (io.BytesIO(b'\x00\x00\x00 ftypheic' + b'0' * 64), 'IMG_1.HEIC')},
+                    headers={'X-MI-CSRF': 'token-%d' % self.reporter.id})
+        self.assertEqual(r.status_code, 422)
+        self.assertIn('HEIC', r.get_data(as_text=True))
+
+    def test_qr_sheet(self):
+        status, html = self.content(self.manager, content_id='mi_qr')
+        self.assertNotIn('error-modal-title', html)
+        self.assertIn('content_id=mi_report&amp;resource_id=%d' % self.krios.id, html)
+        from emhub.issues import qr
+        if qr.available():
+            self.assertIn('<svg', html)
+        status, html = self.content(self.reporter, content_id='mi_qr')
+        self.assertIn('error-modal-title', html)
+
     def test_i_have_this_too(self):
         issue = self.new_issue()
         client = self.client_for(self.other)

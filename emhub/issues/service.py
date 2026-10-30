@@ -921,6 +921,24 @@ class IssuesService:
         self._save(issue, user)
         return event
 
+    def own_issue(self, issue_id, user=None):
+        """ A report as its reporter may see it (to add photos from a
+        phone): what it is about and the files they added, nothing else. """
+        user = user if user is not None else self.app.user
+        roles = self.roles(user)
+        require(roles, REPORTER)
+        issue = self._issue(issue_id)
+        if MANAGER not in roles and issue.reporter_id != user.id:
+            raise Forbidden('You can only add files to your own reports.')
+        areas = {a['id']: a['label'] for a in self.problem_areas(include_hidden=True)}
+        return {'id': issue.id, 'ticket': issue.ticket,
+                'instrument_name': issue.instrument_name,
+                'area_label': areas.get(issue.problem_area, issue.problem_area),
+                'symptoms': [sy.label for sy in issue.symptoms],
+                'reported_at': iso(issue.reported_at), 'is_open': issue.is_open,
+                'files': [a.filename for a in issue.attachments
+                          if not a.internal and a.uploaded_by_id == user.id]}
+
     def open_on_instrument(self, instrument_id, user=None):
         """ Open issues on an instrument, as the report form shows them to
         any user before reporting: what the problem is and how many people
@@ -1002,6 +1020,10 @@ class IssuesService:
         safe = secure_filename(filename or '') or 'file'
         ext = safe.rsplit('.', 1)[-1].lower() if '.' in safe else ''
         content_type = sniff_content_type(ext, data)
+        if ext in ('heic', 'heif'):
+            raise ValidationError({'file': 'iPhone HEIC photos cannot be shown to staff. On the '
+                                           'iPhone, choose Settings > Camera > Formats > Most '
+                                           'Compatible, or send a screenshot instead.'})
         if content_type is None:
             raise ValidationError({'file': 'Allowed files: images (PNG, JPEG, GIF), PDF '
                                            'and text logs (TXT, LOG, CSV, JSON).'})
