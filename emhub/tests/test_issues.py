@@ -355,6 +355,26 @@ class TestIssues(unittest.TestCase):
         second = self.new_issue()
         self.assertEqual(second['ticket'], 'MI-%s-%04d' % (year, int(n) + 1))
 
+    def test_new_areas_keep_their_place_in_a_saved_order(self):
+        # A facility saved its order before 'holder' and the FIB areas existed
+        with self.app.app_context():
+            builtin = [a['id'] for a in self.svc.builtin_knowledge()['problem_areas']]
+            old = [aid for aid in builtin if aid not in ('holder', 'fib_transfer')]
+            old.remove('beam')
+            old.insert(0, 'beam')  # the facility moved 'beam' to the top
+            version = self.svc.store.catalog().get('version', 0)
+            self.svc.store.save_catalog({'order': old}, version)
+            self.svc.store.commit()
+            try:
+                ids = [a['id'] for a in self.svc.problem_areas()]
+            finally:
+                self.svc.store.save_catalog({}, self.svc.store.catalog()['version'])
+                self.svc.store.commit()
+        self.assertEqual(ids[0], 'beam')
+        self.assertEqual(ids.index('holder'), ids.index('loader') + 1)
+        self.assertEqual(ids.index('fib_transfer'), ids.index('quality') + 1)
+        self.assertEqual(ids[-1], 'other')
+
     def test_problem_area_editor(self):
         """ Managers add and change problem areas, also per instrument. """
         r = self.client_for(self.reporter).get('/api/mi/catalog')

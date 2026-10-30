@@ -242,7 +242,13 @@ class IssuesService:
         items.update({aid: (a, False, True) for aid, a in changes.items()
                       if aid not in builtin_ids})
         order = [aid for aid in catalog.get('order') or [] if aid in items]
-        order += [aid for aid in items if aid not in order]
+        # Areas the saved order does not know (e.g. added by an upgrade) go
+        # after the area they follow by default
+        previous = None
+        for aid in items:
+            if aid not in order:
+                order.insert(order.index(previous) + 1 if previous else 0, aid)
+            previous = aid
         return [items[aid] for aid in order]
 
     def problem_areas(self, instrument=None, include_hidden=False):
