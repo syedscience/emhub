@@ -233,7 +233,7 @@
         var sel = $('#mi-booking').empty();
         MY_SESSIONS.forEach(function (x, i) {
             var when = fmtTime(x.start) + (x.end ? ' to ' + fmtTime(x.end) : '');
-            sel.append(option(String(i), [x.instrument_name, when, x.session_name || x.title]
+            sel.append(option(String(i), [x.instrument_name, when, x.session_name || x.title || 'your booking']
                 .filter(Boolean).join(' · ')));
         });
         sel.append(option('', MY_SESSIONS.length ? 'Not in one of these sessions' : 'No booking or session right now'));

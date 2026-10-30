@@ -527,10 +527,14 @@ class IssuesService:
             if as_utc(b.start) - dt.timedelta(hours=1) <= now <= as_utc(b.end) + dt.timedelta(hours=2):
                 sessions = sorted(b.session or [], key=lambda s: s.id)
                 add(b, sessions[-1] if sessions else None)
+        # Sessions stay 'active' after they end, so a session with a booking
+        # counts only through its current booking (above), and one without
+        # a booking only if it started recently
         for s in dm.get_sessions(condition=f"operator_id={uid} AND start>='{since}'"):
-            if s.id not in seen and s.status == 'active' and (
-                    s.end is None or as_utc(s.end) >= now - dt.timedelta(hours=2)):
-                add(s.booking, s)
+            if (s.id not in seen and s.booking_id is None and s.status == 'active'
+                    and s.start and as_utc(s.start) >= now - dt.timedelta(hours=12)
+                    and (s.end is None or as_utc(s.end) >= now - dt.timedelta(hours=2))):
+                add(None, s)
         items.sort(key=lambda x: x['start'] or '', reverse=True)
         return items
 
