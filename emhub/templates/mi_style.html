@@ -145,4 +145,79 @@
 .mi .chips.small .chip span{padding:3px 9px;font-size:12.5px}
 .mi .okmsg{color:var(--ok);font-size:13.5px}
 .mi details > summary{cursor:pointer;color:var(--primary);font-size:13.5px;margin:4px 0}
+
+/* Pills for urgency and status */
+.mi .pill{display:inline-block;padding:1px 9px;border-radius:999px;font-size:12.5px;border:1px solid currentColor;white-space:nowrap;line-height:1.5;font-weight:600;background:transparent}
+.mi .pill.stop{color:var(--stop);background:var(--stop-bg)}
+.mi .pill.blocked{color:var(--block);background:var(--block-bg)}
+.mi .pill.degraded{color:var(--degrade);background:var(--degrade-bg)}
+.mi .pill.question{color:var(--ask);background:var(--ask-bg)}
+.mi .pill.st-open{color:var(--block)}
+.mi .pill.st-new{color:var(--stop)}
+.mi .pill.st-done{color:var(--ok)}
+.mi .pill.st-muted{color:var(--muted)}
+
+/* Issue log */
+.mi .stats{display:flex;flex-wrap:wrap;margin:0 0 16px;padding:0;border-top:3px solid var(--ink);border-bottom:1px solid var(--line);background:var(--surface)}
+.mi .stats > div{flex:1 1 160px;padding:12px 16px;border-right:1px solid var(--line)}
+.mi .stats > div:last-child{border-right:0}
+.mi .stats dt{color:var(--muted);font-size:13px;font-weight:400}
+.mi .stats dd{margin:2px 0 0;font-family:var(--serif);font-size:28px;font-variant-numeric:tabular-nums;line-height:1.2}
+.mi .stats dd.alert-num{color:var(--stop)}
+.mi .insts{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
+.mi .inst{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid var(--line);border-left:5px solid var(--ok);border-radius:6px;background:var(--surface);color:var(--ink);font-size:13.5px;text-decoration:none}
+.mi .inst:hover{text-decoration:none;color:var(--ink);background:var(--surface-2)}
+.mi .inst.busy{border-left-color:var(--block)}
+.mi .inst.urgent{border-left-color:var(--stop)}
+.mi .inst.on{box-shadow:0 0 0 2px var(--ink)}
+.mi .inst b{font-variant-numeric:tabular-nums}
+.mi .logbar{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:14px 16px;margin-bottom:12px}
+.mi .logbar > div{min-width:150px;flex:1 1 150px}
+.mi .logbar .grow{flex:100 1 auto;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.mi .tablewrap{overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.mi table.mi-table{width:100%;border-collapse:collapse;font-size:13.5px}
+.mi table.mi-table th,.mi table.mi-table td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top;border-top:0}
+.mi table.mi-table thead th{background:var(--surface-2);font-weight:600;color:var(--ink);border-bottom:1px solid var(--line)}
+.mi table.mi-table tbody tr:hover td{background:var(--surface-2)}
+.mi table.mi-table a{font-weight:600}
+.mi .dataTables_wrapper{color:var(--muted);font-size:13.5px}
+.mi .dataTables_wrapper input,.mi .dataTables_wrapper select{background:var(--surface-2);border:1px solid var(--line);border-radius:6px;padding:4px 8px}
+.mi .dataTables_wrapper .page-link{color:var(--ink);border-color:var(--line)}
+.mi .dataTables_wrapper .page-item.active .page-link{background:var(--ink);border-color:var(--ink);color:var(--surface)}
+.mi .notice .nbody .rowbtns{margin-left:auto}
+.mi .notice .nbody{display:flex;gap:12px;align-items:center}
+
+/* EMhub (Bootstrap) parts inside the Microscope Issues pages */
+.mi .card{background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:none;margin-bottom:18px}
+.mi .card-header{background:var(--surface);border-bottom:1px solid var(--line);padding:14px 18px}
+.mi .card-header h5,.mi .card-header .card-title,.mi .card h5{font-family:var(--serif);font-weight:600;color:var(--ink);font-size:18px}
+.mi .card-body{padding:16px 18px}
+.mi .btn{border-radius:6px;font-size:14px}
+.mi .btn-primary{background:var(--primary);border-color:var(--primary);color:var(--primary-ink)}
+.mi .btn-primary:hover,.mi .btn-primary:focus{background:#095B63;border-color:#095B63;color:var(--primary-ink)}
+.mi .btn-outline-primary,.mi .btn-outline-secondary,.mi .btn-outline-info,.mi .btn-light,.mi .btn-secondary,.mi .btn-outline-success{background:var(--surface-2);border-color:var(--line);color:var(--ink)}
+.mi .btn-outline-primary:hover,.mi .btn-outline-secondary:hover,.mi .btn-outline-info:hover,.mi .btn-light:hover,.mi .btn-secondary:hover,.mi .btn-outline-success:hover{background:var(--line);color:var(--ink)}
+.mi .btn-outline-danger{background:var(--stop-bg);border-color:var(--stop);color:var(--stop)}
+.mi .btn-outline-danger:hover,.mi .btn-danger{background:var(--stop);border-color:var(--stop);color:#fff}
+.mi .btn-success{background:var(--ok);border-color:var(--ok)}
+.mi .btn-warning{background:var(--block);border-color:var(--block);color:#fff}
+.mi .btn-link{color:var(--primary)}
+.mi .form-control{background:var(--surface-2);border:1px solid var(--line);border-radius:6px;color:var(--ink)}
+.mi .form-control:focus{border-color:var(--primary);box-shadow:0 0 0 2px rgba(11,110,120,.25)}
+.mi label{color:var(--ink);font-weight:600;font-size:13.5px}
+.mi .text-muted{color:var(--muted)!important}
+.mi .table{color:var(--ink);font-size:13.5px}
+.mi .table thead th{background:var(--surface-2);border-bottom:1px solid var(--line);font-weight:600}
+.mi .table td,.mi .table th{border-color:var(--line)}
+.mi .table-striped tbody tr:nth-of-type(odd){background:transparent}
+.mi .alert{border-radius:6px;border:1px solid var(--line);border-left-width:6px;color:var(--ink)}
+.mi .alert-success{background:var(--ok-bg);border-left-color:var(--ok)}
+.mi .alert-danger{background:var(--stop-bg);border-left-color:var(--stop)}
+.mi .alert-warning{background:var(--block-bg);border-left-color:var(--block)}
+.mi .alert-info{background:var(--degrade-bg);border-left-color:var(--degrade)}
+.mi .badge{font-weight:600;border-radius:999px;padding:3px 8px}
+.mi .badge-light{background:var(--surface-2);color:var(--muted);border:1px solid var(--line)}
+.mi .modal-content{border-radius:8px;border:1px solid var(--line);font-family:var(--sans);color:var(--ink)}
+.mi .modal-title{font-family:var(--serif);font-weight:600}
+.mi .list-group-item{border-color:var(--line)}
 </style>

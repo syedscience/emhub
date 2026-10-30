@@ -48,6 +48,12 @@ def register_content(dc):
         dc.check_user_access('microscope_issues')
         return dc.app.issues
 
+    def _page(svc):
+        """ What the shared page header and tabs need. """
+        roles = svc.roles()
+        return {'is_manager': MANAGER in roles, 'is_admin': ADMIN in roles,
+                'facility_name': svc.config().get('facility_name') or 'Cryo-EM Facility'}
+
     def _int(value):
         try:
             return int(value)
@@ -67,7 +73,18 @@ def register_content(dc):
                                  instrument_id=instrument_id, mine=mine,
                                  assigned=assigned)
         instruments = svc.instruments(reportable_only=False)
+        open_issues = svc.list_issues(status='open')
+        me = svc.app.user.id
         return {
+            **_page(svc),
+            'stats': {
+                'open': len(open_issues),
+                'urgent': sum(1 for i in open_issues if i.severity in ('stop', 'blocked')),
+                'new': sum(1 for i in open_issues if i.status in ('new', 'reopened')),
+                'mine': sum(1 for i in open_issues if i.assignee_id == me),
+            },
+            'urgent_counts': {i.instrument_id: True for i in open_issues
+                              if i.severity in ('stop', 'blocked')},
             'issues': [svc.issue_json(i) for i in issues],
             'instruments': [i for i in instruments if i.is_reportable],
             'open_counts': svc.counts(),
@@ -76,7 +93,6 @@ def register_content(dc):
                         'mine': mine, 'assigned': assigned},
             'severities': svc.severities(),
             'areas': {a['id']: a['label'] for a in svc.problem_areas(include_hidden=True)},
-            'is_admin': ADMIN in roles,
             'csrf_token': csrf_token(),
         }
 
@@ -95,6 +111,7 @@ def register_content(dc):
                    'instrument_id': instrument_id or '',
                    'imported': '1' if include_imported else '0'}
         return {
+            **_page(svc),
             'data': data,
             'filters': filters,
             'instruments': svc.instruments(reportable_only=False),
@@ -133,6 +150,7 @@ def register_content(dc):
         data = svc.issue_json(issue, detail=True)
         kb = svc.knowledge()
         return {
+            **_page(svc),
             'issue': data,
             'created': kwargs.get('created') == '1' and data['is_mine'],
             'severities': svc.severities(),
@@ -150,9 +168,7 @@ def register_content(dc):
         roles = svc.roles()
         require(roles, MANAGER)
         return {
-            'is_manager': True,
-            'is_admin': ADMIN in roles,
-            'facility_name': svc.config().get('facility_name') or 'Cryo-EM Facility',
+            **_page(svc),
             'selected_area': str(kwargs.get('area') or ''),
             'csrf_token': csrf_token(),
         }
@@ -163,6 +179,7 @@ def register_content(dc):
         require(svc.roles(), ADMIN)
         outbox = svc.outbox_summary()
         return {
+            **_page(svc),
             'notifications': svc.notification_settings(),
             'webhooks': svc.webhook_names(),
             'instruments': svc.instruments(reportable_only=False),

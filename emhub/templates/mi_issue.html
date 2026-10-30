@@ -4,10 +4,17 @@
 {% set open_statuses = ['new', 'acknowledged', 'investigating', 'waiting_vendor', 'reopened'] %}
 {% set is_open = issue.status in open_statuses %}
 
-<div class="container-fluid dashboard-content">
-    {% set title = issue.ticket ~ ': ' ~ issue.title %}
-    {% set navigation = [('Microscope Issues', url_for_content('mi_issues')), (issue.ticket, '')] %}
-    {% include 'include_header.html' %}
+{% include "mi_style.html" %}
+
+<div class="mi">
+<div class="wrap">
+    <header class="top">
+        <p class="fac">{{ facility_name }}</p>
+        <h1>{{ issue.ticket }}: {{ issue.title }}</h1>
+        <p class="sub">{{ issue.instrument_name }} · {{ areas.get(issue.problem_area, issue.problem_area) }} · reported by {{ issue.reporter_name }}, {{ issue.reported_at|pretty_datetime }}</p>
+        {% set active = 'mi_issues' %}
+        {% include 'mi_tabs.html' %}
+    </header>
 
     {% if created %}
         <div class="alert alert-success">
@@ -323,6 +330,8 @@
         <textarea class="form-control" id="mi-reopen-reason" rows="3" data-field="reason"></textarea>
     </div>
 {% endcall %}
+
+</div>
 
 <script>
 (function () {

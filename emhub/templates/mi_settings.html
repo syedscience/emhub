@@ -1,10 +1,16 @@
 {% include "mi_common.html" %}
 
-<div class="container-fluid dashboard-content">
-    {% set title = "Microscope Issues settings" %}
-    {% set about = "Who is notified, escalation times and which instruments accept reports." %}
-    {% set navigation = [('Microscope Issues', url_for_content('mi_issues')), ('Settings', '')] %}
-    {% include 'include_header.html' %}
+{% include "mi_style.html" %}
+
+<div class="mi">
+<div class="wrap">
+    <header class="top">
+        <p class="fac">{{ facility_name }}</p>
+        <h1>Settings</h1>
+        <p class="sub">Who is notified, escalation times and which instruments accept reports.</p>
+        {% set active = 'mi_settings' %}
+        {% include 'mi_tabs.html' %}
+    </header>
 
     <div class="alert alert-danger" id="mi-settings-error" style="display: none"></div>
     <div class="alert alert-success" id="mi-settings-ok" style="display: none"></div>
@@ -176,6 +182,8 @@
             </div>
         </div>
     </div>
+</div>
+
 </div>
 
 <script>
