@@ -1,0 +1,128 @@
+{# Look of the Microscope Issues pages, from the St Jude prototype.
+   Everything is scoped under .mi so EMhub's own pages are not affected. #}
+<style>
+.mi{
+  --bg:#EDF2F4; --surface:#FFFFFF; --surface-2:#F3F7F9; --ink:#14283A; --muted:#506574; --line:#CBD8DF;
+  --primary:#0B6E78; --primary-ink:#FFFFFF;
+  --stop:#B3261E; --stop-bg:#FBE9E7;
+  --block:#8F5400; --block-bg:#FFF1D6;
+  --degrade:#1B5FA8; --degrade-bg:#E4EFFB;
+  --ask:#4B6270; --ask-bg:#E8EEF1;
+  --ok:#1E7B4B; --ok-bg:#E2F4EA;
+  --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
+  --sans:"Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+  font-family:var(--sans); color:var(--ink); background:var(--bg); line-height:1.5; font-size:15px;
+  margin:-10px -15px 0; padding:24px 22px 48px; min-height:calc(100vh - 80px);
+}
+.mi *{box-sizing:border-box}
+.mi .wrap{max-width:1240px;margin:0 auto}
+.mi h1,.mi h2,.mi h3{font-family:var(--serif);font-weight:600;margin:0;line-height:1.2;color:var(--ink)}
+.mi h1{font-size:30px;letter-spacing:-.01em}
+.mi h2{font-size:21px}
+.mi h3{font-size:16px}
+.mi a{color:var(--primary)}
+.mi .top{margin-bottom:20px}
+.mi .fac{margin:0 0 4px;color:var(--muted);font-size:14px}
+.mi .sub{margin:6px 0 0;color:var(--muted);max-width:62ch}
+
+.mi .tabs{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
+.mi .tabs a{display:inline-block;border-radius:6px;padding:7px 14px;border:1px solid var(--line);background:var(--surface-2);color:var(--ink);text-decoration:none;font-size:14px}
+.mi .tabs a.on{background:var(--ink);color:var(--surface);border-color:var(--ink);font-weight:600}
+
+.mi .grid{display:grid;grid-template-columns:minmax(0,1fr) 430px;gap:22px;align-items:start}
+@media (max-width:1100px){.mi .grid{grid-template-columns:1fr}}
+
+.mi form{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:6px 22px 22px}
+.mi fieldset{border:0;margin:0;padding:0;min-width:0}
+.mi fieldset:disabled{opacity:.62}
+.mi .sect{padding:18px 0 4px;border-top:1px solid var(--line)}
+.mi .sect:first-of-type{border-top:0}
+.mi .sect > h2{margin-bottom:12px}
+.mi .row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 14px;margin:0 0 12px}
+.mi .row.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media (max-width:720px){.mi .row,.mi .row.three{grid-template-columns:1fr}}
+.mi .row.one{grid-template-columns:1fr}
+.mi label.f,.mi .f{display:block;font-size:13.5px;font-weight:600;margin-bottom:4px}
+.mi .req{color:var(--stop)}
+.mi .hint{display:block;font-weight:400;color:var(--muted);font-size:13px}
+.mi input[type=text],.mi input[type=datetime-local],.mi select,.mi textarea{width:100%;font:inherit;color:var(--ink);background:var(--surface-2);border:1px solid var(--line);border-radius:6px;padding:8px 10px;height:auto}
+.mi input[readonly]{background:var(--surface);color:var(--muted)}
+.mi textarea{min-height:92px;resize:vertical}
+.mi .invalid{border-color:var(--stop)!important;box-shadow:0 0 0 1px var(--stop)}
+.mi .ferr{color:var(--stop);font-size:13px;margin-top:3px}
+.mi .ferr:empty{display:none}
+.mi :focus-visible{outline:3px solid var(--primary);outline-offset:2px}
+
+.mi .chips{display:flex;flex-wrap:wrap;gap:8px}
+.mi .chip{position:relative;margin:0}
+.mi .chip input{position:absolute;opacity:0;inset:0;margin:0;cursor:pointer}
+.mi .chip span{display:inline-block;padding:6px 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface-2);font-size:13.5px;cursor:pointer}
+.mi .chip input:checked + span{background:var(--primary);color:var(--primary-ink);border-color:var(--primary)}
+.mi .chip input:focus-visible + span{outline:3px solid var(--primary);outline-offset:2px}
+.mi .empty-note{color:var(--muted);font-size:13.5px;margin:0}
+
+.mi .sevs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+@media (max-width:720px){.mi .sevs{grid-template-columns:1fr}}
+.mi .sev{position:relative}
+.mi .sev input{position:absolute;opacity:0;inset:0;margin:0;cursor:pointer}
+.mi .sev label{display:block;margin:0;padding:10px 12px 10px 14px;border:1px solid var(--line);border-left-width:7px;border-radius:6px;background:var(--surface-2);cursor:pointer}
+.mi .sev label b{display:block;font-size:14.5px}
+.mi .sev label small{color:var(--muted);font-size:13px}
+.mi .sev.s-stop label{border-left-color:var(--stop)}
+.mi .sev.s-blocked label{border-left-color:var(--block)}
+.mi .sev.s-degraded label{border-left-color:var(--degrade)}
+.mi .sev.s-question label{border-left-color:var(--ask)}
+.mi .sev input:checked + label{background:var(--surface);box-shadow:0 0 0 2px var(--ink)}
+.mi .sev input:focus-visible + label{outline:3px solid var(--primary);outline-offset:2px}
+.mi .bump{margin:8px 0 0;font-size:13.5px;color:var(--block)}
+
+.mi .actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:18px}
+.mi .btn-mi{font:inherit;cursor:pointer;border-radius:6px;padding:9px 16px;border:1px solid var(--line);background:var(--surface-2);color:var(--ink);text-decoration:none;display:inline-block}
+.mi .btn-mi:hover{text-decoration:none;color:var(--ink);filter:brightness(.97)}
+.mi .btn-mi.primary{background:var(--primary);color:var(--primary-ink);border-color:var(--primary);font-weight:600}
+.mi .btn-mi:disabled{opacity:.55;cursor:not-allowed}
+.mi .btn-mi.small{padding:6px 11px;font-size:13.5px}
+.mi .errs{color:var(--stop);font-size:13.5px;margin:12px 0 0}
+
+.mi .lock{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:var(--ok-bg);border:1px solid var(--line);border-left:6px solid var(--ok);padding:12px 16px;border-radius:6px;margin-bottom:16px}
+.mi .lock b{font-size:16px}
+
+.mi #mi-notices{display:grid;gap:10px;margin-bottom:14px}
+.mi #mi-notices:empty{display:none}
+.mi .notice{display:flex;background:var(--surface);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.mi .notice .rail{flex:0 0 8px;background:var(--degrade)}
+.mi .notice.l-danger .rail{background:var(--stop)}
+.mi .notice.l-warning .rail{background:var(--block)}
+.mi .notice.l-success .rail{background:var(--ok)}
+.mi .notice .nbody{padding:10px 14px;flex:1;min-width:0}
+
+/* Waiting panel: the severity rail is the one deliberate visual device */
+.mi .panel{position:sticky;top:80px;display:flex;background:var(--surface);border:1px solid var(--line);border-radius:8px;overflow:hidden;max-height:calc(100vh - 100px)}
+@media (max-width:1100px){.mi .panel{position:static;max-height:none}}
+.mi .panel .rail{flex:0 0 12px;background:var(--rail,var(--line))}
+.mi .panel.sev-stop{--rail:var(--stop)}
+.mi .panel.sev-blocked{--rail:var(--block)}
+.mi .panel.sev-degraded{--rail:var(--degrade)}
+.mi .panel.sev-question{--rail:var(--ask)}
+.mi .pbody{padding:16px 18px 18px;overflow:auto;min-width:0;flex:1}
+.mi .pbody h2{margin-bottom:8px}
+.mi .clock{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.mi .clock .t{font-family:var(--serif);font-size:44px;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.mi .clock .l{color:var(--muted)}
+.mi .meta{color:var(--muted);font-size:13.5px;margin:0 0 10px}
+.mi .callout{background:var(--stop-bg);border-left:5px solid var(--stop);padding:10px 12px;border-radius:4px;margin:0 0 14px}
+.mi .callout.staff{background:var(--block-bg);border-left-color:var(--block)}
+.mi .callout p{margin:0}
+.mi .group{border-top:1px solid var(--line);padding-top:12px;margin-top:12px}
+.mi .group h3{margin-bottom:6px}
+.mi .steps{list-style:none;margin:0;padding:0}
+.mi .steps li{margin:0 0 6px}
+.mi .steps label{display:flex;gap:9px;align-items:flex-start;cursor:pointer;margin:0;font-weight:400}
+.mi .steps input{margin-top:4px;flex:0 0 auto;width:16px;height:16px}
+.mi .steps input:checked + span{color:var(--muted);text-decoration:line-through}
+.mi .plain{margin:0;padding-left:20px}
+.mi .plain li{margin:0 0 4px}
+.mi .avoid h3{color:var(--stop)}
+.mi .panel-empty{color:var(--muted)}
+.mi .foot{margin-top:14px;font-size:13.5px;color:var(--muted)}
+</style>

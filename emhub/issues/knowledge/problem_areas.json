@@ -92,6 +92,10 @@
      "label": "Grid stuck or dropped during transfer",
      "minSeverity": "stop"
     }
+   ],
+   "not_types": [
+    "prep",
+    "light"
    ]
   },
   {
@@ -176,7 +180,9 @@
     }
    ],
    "not_types": [
-    "fib"
+    "fib",
+    "prep",
+    "light"
    ]
   },
   {
@@ -234,6 +240,10 @@
       "If the stage itself errors at high tilt, stop and call staff."
      ]
     }
+   ],
+   "not_types": [
+    "prep",
+    "light"
    ]
   },
   {
@@ -280,7 +290,9 @@
     }
    ],
    "not_types": [
-    "fib"
+    "fib",
+    "prep",
+    "light"
    ]
   },
   {
@@ -318,7 +330,9 @@
     }
    ],
    "not_types": [
-    "fib"
+    "fib",
+    "prep",
+    "light"
    ]
   },
   {
@@ -363,6 +377,10 @@
       "If the script worked earlier in this session, note what changed since then."
      ]
     }
+   ],
+   "not_types": [
+    "prep",
+    "light"
    ]
   },
   {
@@ -453,7 +471,9 @@
     }
    ],
    "not_types": [
-    "fib"
+    "fib",
+    "prep",
+    "light"
    ]
   },
   {
@@ -689,5 +709,93 @@
    ],
    "symptoms": []
   }
- ]
+ ],
+ "context_options": {
+  "detector": {
+   "tem": [
+    "Gatan K3",
+    "Falcon 4i",
+    "Ceta camera",
+    "Other or not sure"
+   ],
+   "fib": [
+    "Not applicable"
+   ],
+   "prep": [
+    "Not applicable"
+   ],
+   "light": [
+    "Not applicable"
+   ],
+   "other": [
+    "Other or not sure",
+    "Not applicable"
+   ]
+  },
+  "software": {
+   "tem": [
+    "EPU",
+    "SerialEM",
+    "Tomo5",
+    "Velox",
+    "Other"
+   ],
+   "fib": [
+    "AutoTEM",
+    "Maps",
+    "xT (microscope UI)",
+    "Other"
+   ],
+   "prep": [
+    "Not applicable",
+    "Other"
+   ],
+   "light": [
+    "ZEN",
+    "Other"
+   ],
+   "other": [
+    "Other"
+   ]
+  },
+  "session_type": {
+   "tem": [
+    "Single-particle collection",
+    "Cryo-ET tilt series",
+    "Screening or atlas",
+    "Alignment or setup",
+    "Other"
+   ],
+   "fib": [
+    "Cryo-FIB milling",
+    "Lift-out",
+    "Screening",
+    "Other"
+   ],
+   "prep": [
+    "Grid preparation",
+    "Other"
+   ],
+   "light": [
+    "Imaging",
+    "Other"
+   ],
+   "other": [
+    "Other"
+   ]
+  },
+  "session_status": [
+   "Running",
+   "Paused",
+   "Stopped",
+   "Not started yet"
+  ],
+  "onset": [
+   "Just now",
+   "5 to 15 minutes ago",
+   "15 to 60 minutes ago",
+   "More than an hour ago",
+   "Comes and goes"
+  ]
+ }
 }

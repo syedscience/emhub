@@ -113,6 +113,9 @@ CONTEXT_FIELDS = ['detector', 'software', 'session_type', 'session_status',
 
 # Default content of the 'config:issues' form (emh-issues init-config)
 DEFAULT_CONFIG = {
+    # Shown on the report form; the phone is shown for 'Stop now' problems
+    'facility_name': 'Cryo-EM Facility',
+    'staff_phone': '',
     # EMhub resource ids that do not accept reports
     'disabled_instruments': [],
     'notifications': {

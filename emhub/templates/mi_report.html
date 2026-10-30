@@ -1,138 +1,161 @@
 {% include "mi_common.html" %}
+{% include "mi_style.html" %}
 
-<div class="container-fluid dashboard-content">
-    {% set title = "Report an issue" %}
-    {% set about = "Tell the facility staff what is wrong. Your name and email are taken from your EMhub login." %}
-    {% if is_manager %}
-        {% set navigation = [('Microscope Issues', url_for_content('mi_issues')), ('Report an issue', '')] %}
-    {% else %}
-        {% set navigation = [('Report an issue', '')] %}
-    {% endif %}
-    {% include 'include_header.html' %}
+<div class="mi">
+<div class="wrap">
+    <header class="top">
+        <p class="fac">{{ facility_name }}</p>
+        <h1>Report a session issue</h1>
+        <p class="sub">Tell staff what is happening. Safe checks for your problem appear on the right while you wait for a reply.</p>
+        {% if is_manager %}
+            <nav class="tabs" aria-label="Views">
+                <a class="on" href="{{ url_for_content('mi_report') }}">Report an issue</a>
+                <a href="{{ url_for_content('mi_issues') }}">Issue log</a>
+                <a href="{{ url_for_content('mi_insights') }}">Insights</a>
+                {% if is_admin %}<a href="{{ url_for_content('mi_settings') }}">Settings</a>{% endif %}
+            </nav>
+        {% endif %}
+    </header>
 
-    {% if submitted %}
-        <div class="alert alert-success">
-            Thank you, your report <strong>{{ submitted }}</strong> was saved and the facility staff
-            have been notified. You will get an email confirmation and updates as it is handled.
-        </div>
-    {% endif %}
+    <div id="mi-notices"></div>
 
-    <div class="row">
-        <div class="col-xl-7 col-lg-7 col-12">
-            <div class="card">
-                <div class="card-body">
-                    <div id="mi-loading" class="text-muted">Loading instruments...</div>
-                    <div id="mi-notices"></div>
-                    <form id="mi-report-form" novalidate style="display: none">
-                        <div class="form-group">
-                            <label for="mi-instrument">Instrument <span class="text-danger">*</span></label>
-                            <select class="form-control" id="mi-instrument" name="instrument_id" required></select>
-                            <div class="invalid-feedback" data-for="instrument_id"></div>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="mi-area">Problem area <span class="text-danger">*</span></label>
-                            <select class="form-control" id="mi-area" name="problem_area" required></select>
-                            <div class="invalid-feedback" data-for="problem_area"></div>
-                        </div>
-
-                        <div class="form-group" id="mi-symptoms-group" style="display: none">
-                            <label>What do you see? <small class="text-muted">(select all that apply)</small></label>
-                            <div id="mi-symptoms"></div>
-                            <div class="invalid-feedback" data-for="symptoms"></div>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="mi-title">Short title <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control" id="mi-title" name="title" maxlength="200" required
-                                   placeholder="e.g. Autoloader will not dock cassette">
-                            <div class="invalid-feedback" data-for="title"></div>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="mi-description">Description</label>
-                            <textarea class="form-control" id="mi-description" name="description" rows="4" maxlength="10000"
-                                      placeholder="What happened, error messages, what you were doing"></textarea>
-                            <div class="invalid-feedback" data-for="description"></div>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="mi-tried">What have you already tried?</label>
-                            <textarea class="form-control" id="mi-tried" name="tried" rows="2" maxlength="5000"></textarea>
-                        </div>
-
-                        <div class="form-row">
-                            <div class="form-group col-md-6">
-                                <label for="mi-occurred">When did it start?</label>
-                                <input type="datetime-local" class="form-control" id="mi-occurred" name="occurred_at">
-                                <div class="invalid-feedback" data-for="occurred_at"></div>
-                            </div>
-                            <div class="form-group col-md-6">
-                                <label for="mi-contact">Where can staff reach you?</label>
-                                <input type="text" class="form-control" id="mi-contact" name="contact" maxlength="256"
-                                       placeholder="Room, phone or Teams">
-                            </div>
-                        </div>
-
-                        <div class="form-row">
-                            <div class="form-group col-md-4">
-                                <label for="mi-session-status">Session status</label>
-                                <select class="form-control" id="mi-session-status" data-context="session_status">
-                                    <option value=""></option>
-                                    <option>Running</option><option>Paused</option>
-                                    <option>Stopped</option><option>Not started yet</option>
-                                </select>
-                            </div>
-                            <div class="form-group col-md-4">
-                                <label for="mi-software">Software</label>
-                                <select class="form-control" id="mi-software" data-context="software">
-                                    <option value=""></option>
-                                    <option>EPU</option><option>SerialEM</option><option>Tomo5</option>
-                                    <option>AutoTEM</option><option>Other</option>
-                                </select>
-                            </div>
-                            <div class="form-group col-md-4">
-                                <label for="mi-onset">Onset</label>
-                                <select class="form-control" id="mi-onset" data-context="onset">
-                                    <option value=""></option>
-                                    <option>Just now</option><option>5-15 min ago</option>
-                                    <option>15-60 min ago</option><option>More than 1 h ago</option>
-                                    <option>Comes and goes</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <div class="form-group">
-                            <label>How urgent is it? <span class="text-danger">*</span></label>
-                            <div id="mi-severities"></div>
-                            <div class="alert alert-warning mt-2 py-2" id="mi-bump" style="display: none"></div>
-                            <div class="invalid-feedback" data-for="severity"></div>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="mi-files">Screenshots or log files</label>
-                            <input type="file" class="form-control-file" id="mi-files" multiple
-                                   accept=".png,.jpg,.jpeg,.gif,.pdf,.txt,.log,.csv,.json">
-                            <small class="text-muted">PNG, JPEG, GIF, PDF, TXT, LOG, CSV or JSON, up to 20 MB each.</small>
-                        </div>
-
-                        <div class="alert alert-danger" id="mi-form-error" style="display: none"></div>
-
-                        <button type="submit" class="btn btn-primary" id="mi-submit">
-                            <i class="fas fa-paper-plane"></i> Send report</button>
-                        <a class="btn btn-light ml-2" href="{{ url_for_content('mi_issues') }}">Cancel</a>
-                    </form>
-                </div>
-            </div>
-        </div>
-
-        <div class="col-xl-5 col-lg-5 col-12">
-            <div class="card" id="mi-guide" style="display: none">
-                <div class="card-header"><h5 class="mb-0"><i class="fas fa-life-ring"></i> While you wait</h5></div>
-                <div class="card-body" id="mi-guide-body"></div>
-            </div>
-        </div>
+    <div class="lock" id="mi-lock" {% if not submitted %}style="display: none"{% endif %}>
+        <span id="mi-lock-text">
+            {% if submitted %}<b>Report {{ submitted }} sent.</b> Staff have been notified, and you will get an email confirmation.{% endif %}
+        </span>
+        <span>
+            <a class="btn-mi small" id="mi-open-issue" style="display: none">Open the issue</a>
+            <a class="btn-mi small" href="{{ url_for_content('mi_report') }}">Start a new report</a>
+        </span>
     </div>
+
+    <main class="grid">
+        <form id="mi-report-form" novalidate>
+            <p class="meta" id="mi-loading" style="padding-top: 16px">Loading instruments...</p>
+            <fieldset id="mi-fields" disabled>
+                <section class="sect">
+                    <h2>Who and where</h2>
+                    <div class="row">
+                        <div>
+                            <label class="f" for="mi-name">Your name <span class="hint">From your EMhub login.</span></label>
+                            <input type="text" id="mi-name" value="{{ reporter.name }}{% if reporter.email %} ({{ reporter.email }}){% endif %}" readonly>
+                        </div>
+                        <div>
+                            <label class="f" for="mi-lab">Lab or PI <span class="hint">From your EMhub account.</span></label>
+                            <input type="text" id="mi-lab" value="{{ reporter.pi or 'Not set' }}" readonly>
+                        </div>
+                    </div>
+                    <div class="row one">
+                        <div>
+                            <label class="f" for="mi-contact">Where staff can find you <span class="hint">Room, or Teams name or phone number if you are remote.</span></label>
+                            <input type="text" id="mi-contact" name="contact" maxlength="256">
+                            <div class="ferr" data-for="contact"></div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="sect">
+                    <h2>Instrument and session</h2>
+                    <div class="row">
+                        <div>
+                            <label class="f" for="mi-instrument">Instrument <span class="req">*</span></label>
+                            <select id="mi-instrument" name="instrument_id"></select>
+                            <div class="ferr" data-for="instrument_id"></div>
+                        </div>
+                        <div>
+                            <label class="f" for="mi-detector">Detector</label>
+                            <select id="mi-detector" data-context="detector"></select>
+                        </div>
+                        <div>
+                            <label class="f" for="mi-software">Acquisition software</label>
+                            <select id="mi-software" data-context="software"></select>
+                        </div>
+                        <div>
+                            <label class="f" for="mi-stype">Session type</label>
+                            <select id="mi-stype" data-context="session_type"></select>
+                        </div>
+                        <div>
+                            <label class="f" for="mi-sstatus">Session status now</label>
+                            <select id="mi-sstatus" data-context="session_status"></select>
+                        </div>
+                        <div>
+                            <label class="f" for="mi-onset">When did it start</label>
+                            <select id="mi-onset" data-context="onset"></select>
+                        </div>
+                    </div>
+                    <div class="row" id="mi-occurred-row" style="display: none">
+                        <div>
+                            <label class="f" for="mi-occurred">About when did it first happen? <span class="hint">Optional.</span></label>
+                            <input type="datetime-local" id="mi-occurred" name="occurred_at">
+                            <div class="ferr" data-for="occurred_at"></div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="sect">
+                    <h2>What is wrong</h2>
+                    <div class="row one">
+                        <div>
+                            <label class="f" for="mi-area">Problem area <span class="req">*</span></label>
+                            <select id="mi-area" name="problem_area"></select>
+                            <div class="ferr" data-for="problem_area"></div>
+                        </div>
+                    </div>
+                    <div class="row one">
+                        <div>
+                            <span class="f" id="mi-sym-label">What you see <span class="hint" style="display: inline">Pick all that apply.</span></span>
+                            <div class="chips" id="mi-symptoms" role="group" aria-labelledby="mi-sym-label">
+                                <p class="empty-note">Choose a problem area first.</p></div>
+                            <div class="ferr" data-for="symptoms"></div>
+                        </div>
+                    </div>
+                    <div class="row one">
+                        <div>
+                            <label class="f" for="mi-title">Short summary <span class="hint">Optional. If left empty, the problem area and what you see are used.</span></label>
+                            <input type="text" id="mi-title" name="title" maxlength="200"
+                                   placeholder="e.g. Autoloader will not dock cassette">
+                            <div class="ferr" data-for="title"></div>
+                        </div>
+                    </div>
+                    <div class="row one">
+                        <div>
+                            <label class="f" for="mi-description">Describe the problem <span class="hint">Include exact error text, the step it happened on, and anything that changed just before.</span></label>
+                            <textarea id="mi-description" name="description" maxlength="10000"></textarea>
+                            <div class="ferr" data-for="description"></div>
+                        </div>
+                    </div>
+                    <div class="row one">
+                        <div>
+                            <label class="f" for="mi-tried">What you have already tried <span class="hint">Optional. Steps you tick on the right are added here.</span></label>
+                            <textarea id="mi-tried" name="tried" maxlength="5000" style="min-height: 64px"></textarea>
+                        </div>
+                    </div>
+                    <div class="row one">
+                        <div>
+                            <label class="f" for="mi-files">Screenshots or log files <span class="hint">Optional. PNG, JPEG, GIF, PDF, TXT, LOG, CSV or JSON, up to 20 MB each.</span></label>
+                            <input type="file" id="mi-files" multiple accept=".png,.jpg,.jpeg,.gif,.pdf,.txt,.log,.csv,.json">
+                        </div>
+                    </div>
+                </section>
+
+                <section class="sect">
+                    <h2>How urgent is it <span class="req">*</span></h2>
+                    <div class="sevs" id="mi-severities" role="radiogroup" aria-label="Urgency"></div>
+                    <p class="bump" id="mi-bump" style="display: none"></p>
+                    <div class="ferr" data-for="severity"></div>
+                </section>
+
+                <div class="actions">
+                    <button type="submit" class="btn-mi primary" id="mi-submit">Send to staff</button>
+                    <button type="button" class="btn-mi" id="mi-reset">Clear form</button>
+                </div>
+                <p class="errs" id="mi-form-error" role="alert" style="display: none"></p>
+            </fieldset>
+        </form>
+
+        <aside class="panel" id="mi-panel" aria-live="polite" aria-label="Troubleshooting while you wait"></aside>
+    </main>
+</div>
 </div>
 
 <script>
@@ -140,30 +163,48 @@
     var META_URL = "{{ url_for('issues_api.meta') }}";
     var CREATE_URL = "{{ url_for('issues_api.create_issue') }}";
     var ISSUE_URL = "{{ url_for_content('mi_issue') }}";
-    var REPORT_URL = "{{ url_for_content('mi_report') }}";
     var IS_MANAGER = {{ is_manager|tojson }};
+    var STAFF_PHONE = {{ staff_phone|tojson }};
     var CSRF = "{{ csrf_token }}";
-    var noticeRequest = 0;
     var SELECTED = {{ selected_instrument_id|tojson }};
-    var meta = null, areasById = {}, sevRank = {};
+    var meta = null, areasById = {}, sevById = {}, noticeRequest = 0;
+    var sent = null;        // {ticket, at, severity} once the report is saved
+    var ticked = {};        // checks ticked in the panel, by step id
     // One key per form load, so double clicks or retries create one issue
     var idempotencyKey = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
         : String(Date.now()) + Math.random().toString(16).slice(2);
 
-    function option(value, label) {
-        return $('<option>').val(value).text(label);
+    function option(value, label) { return $('<option>').val(value).text(label); }
+    function esc(t) { return $('<div>').text(t == null ? '' : t).html(); }
+    function selectedInstrument() {
+        var id = $('#mi-instrument').val();
+        return meta.instruments.find(function (i) { return String(i.id) === id; });
     }
-
-    function list(title, items, cls) {
-        if (!items || !items.length) return null;
-        var div = $('<div class="mb-3">');
-        div.append($('<h6>').addClass(cls || '').text(title));
-        var ul = $('<ul class="mb-0 pl-3">');
-        items.forEach(function (t) { ul.append($('<li>').text(t)); });
-        return div.append(ul);
-    }
-
     function selectedArea() { return areasById[$('#mi-area').val()]; }
+    function selectedSymptoms() {
+        return $('#mi-symptoms input:checked').map(function () { return $(this).val(); }).get();
+    }
+
+    // Choices for one session field, for the instrument's type
+    function contextChoices(field, inst) {
+        var opts = (meta.context_options || {})[field];
+        if (!opts) return [];
+        if (Array.isArray(opts)) return opts;
+        var t = inst ? inst.instrument_type : 'other';
+        return opts[t] || opts.other || [];
+    }
+
+    function fillContext() {
+        var inst = selectedInstrument();
+        $('[data-context]').each(function () {
+            var sel = $(this), field = sel.data('context'), keep = sel.val();
+            var choices = contextChoices(field, inst);
+            sel.empty().append(option('', 'Choose...'));
+            choices.forEach(function (c) { sel.append(option(c, c)); });
+            if (keep && choices.indexOf(keep) >= 0) sel.val(keep);
+            else if (choices.length === 1) sel.val(choices[0]);
+        });
+    }
 
     function renderNotices() {
         var instId = $('#mi-instrument').val(), req = ++noticeRequest;
@@ -172,89 +213,190 @@
         $.getJSON(MI.api + '/notices', {instrument_id: instId}).done(function (data) {
             if (req !== noticeRequest) return;
             data.notices.forEach(function (n) {
-                $('#mi-notices').append($('<div class="alert">').addClass('alert-' + n.level)
-                    .text((n.instrument_name ? n.instrument_name + ': ' : '') + n.message));
+                $('#mi-notices').append($('<div class="notice">').addClass('l-' + n.level).append(
+                    '<div class="rail"></div>',
+                    $('<div class="nbody">').append(
+                        $('<b>').text(n.instrument_name || 'All instruments'),
+                        $('<p class="mb-0">').text(n.message))));
             });
         });
     }
 
     function renderAreas() {
-        var inst = meta.instruments.find(function (i) { return String(i.id) === $('#mi-instrument').val(); });
-        var sel = $('#mi-area').empty().append(option('', 'Select a problem area...'));
-        if (inst) {
+        var inst = selectedInstrument(), keep = $('#mi-area').val();
+        var sel = $('#mi-area').empty();
+        if (!inst) {
+            sel.append(option('', 'Choose an instrument first'));
+        } else {
+            sel.append(option('', 'Choose problem area'));
             inst.problem_areas.forEach(function (aid) {
                 if (areasById[aid]) sel.append(option(aid, areasById[aid].label));
             });
+            if (keep && inst.problem_areas.indexOf(keep) >= 0) sel.val(keep);
         }
-        renderArea();
-    }
-
-    function renderArea() {
-        var area = selectedArea();
-        var box = $('#mi-symptoms').empty();
-        var guide = $('#mi-guide-body').empty();
-        if (!area) {
-            $('#mi-symptoms-group, #mi-guide').hide();
-            updateBump();
-            renderNotices();
-            return;
-        }
-        (area.symptoms || []).forEach(function (s) {
-            box.append($('<label class="custom-control custom-checkbox d-block">').append(
-                $('<input type="checkbox" class="custom-control-input mi-symptom">').val(s.id),
-                $('<span class="custom-control-label">').text(s.label)));
-        });
-        $('#mi-symptoms-group').toggle((area.symptoms || []).length > 0);
+        fillContext();
+        renderSymptoms();
         renderNotices();
-
-        if (area.staffOnly) {
-            guide.append($('<div class="alert alert-danger py-2">').text(
-                'Staff action only: do not try to fix this yourself. Report it and wait for staff.'));
-        }
-        [list('Do this now', area.hold, 'text-danger'),
-         list('Checks you can do', area.general),
-         list('Avoid', area.avoid, 'text-warning'),
-         list('Please note in your report', area.record)].forEach(function (el) {
-            if (el) guide.append(el);
-        });
-        $('#mi-guide').toggle(guide.children().length > 0);
-        updateBump();
     }
 
+    function renderSymptoms() {
+        var area = selectedArea(), box = $('#mi-symptoms').empty();
+        if (!area) {
+            box.append('<p class="empty-note">Choose a problem area first.</p>');
+        } else if (!(area.symptoms || []).length) {
+            box.append('<p class="empty-note">No presets for this area. Describe it below.</p>');
+        } else {
+            area.symptoms.forEach(function (s) {
+                box.append($('<label class="chip">').append(
+                    $('<input type="checkbox">').val(s.id), $('<span>').text(s.label)));
+            });
+        }
+        refresh();
+    }
+
+    // The urgency the report is sent with: some problems are always urgent
     function minimumSeverity() {
         var area = selectedArea(), best = null;
         if (!area) return null;
-        var candidates = [area.minSeverity];
-        $('.mi-symptom:checked').each(function () {
-            var sid = $(this).val();
-            var s = (area.symptoms || []).find(function (x) { return x.id === sid; });
-            if (s) candidates.push(s.minSeverity);
+        var candidates = [area.minSeverity], ids = selectedSymptoms();
+        (area.symptoms || []).forEach(function (s) {
+            if (ids.indexOf(s.id) >= 0) candidates.push(s.minSeverity);
         });
         candidates.forEach(function (m) {
-            if (m in sevRank && (best === null || sevRank[m] > sevRank[best])) best = m;
+            if (sevById[m] && (best === null || sevById[m].rank > sevById[best].rank)) best = m;
         });
         return best;
     }
 
-    function updateBump() {
+    function effectiveSeverity() {
+        if (sent) return sent.severity;
+        var chosen = $('input[name=severity]:checked').val(), min = minimumSeverity();
+        if (!chosen) return min;
+        return (min && sevById[min].rank > sevById[chosen].rank) ? min : chosen;
+    }
+
+    function refresh() {
         var min = minimumSeverity(), chosen = $('input[name=severity]:checked').val();
-        if (min && chosen && sevRank[chosen] < sevRank[min]) {
-            var label = meta.severities.find(function (s) { return s.id === min; }).label;
-            $('#mi-bump').text('This problem is always treated as at least "' + label +
+        if (min && chosen && sevById[chosen].rank < sevById[min].rank) {
+            $('#mi-bump').text('This problem is always treated as at least "' + sevById[min].label +
                                '". It will be sent with that urgency.').show();
         } else {
             $('#mi-bump').hide();
         }
+        renderPanel();
+    }
+
+    // ---------------- "While you wait for staff" panel ----------------
+    function stepGroups(area, symIds) {
+        var groups = [];
+        (area.symptoms || []).forEach(function (s) {
+            if (symIds.indexOf(s.id) >= 0 && s.steps && s.steps.length) {
+                groups.push({title: s.label, id: area.id + ':' + s.id, steps: s.steps});
+            }
+        });
+        if (area.general && area.general.length) {
+            groups.push({title: groups.length ? 'General checks' : 'Start here',
+                         id: area.id + ':gen', steps: area.general});
+        }
+        return groups;
+    }
+
+    function plainList(title, items, cls) {
+        if (!items || !items.length) return '';
+        return '<div class="group ' + (cls || '') + '"><h3>' + esc(title) + '</h3><ul class="plain">' +
+            items.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul></div>';
+    }
+
+    function fmtClock(secs) {
+        return String(Math.floor(secs / 60)).padStart(2, '0') + ':' + String(secs % 60).padStart(2, '0');
+    }
+
+    function statusHtml() {
+        if (!sent) return '<p class="meta">Nothing sent yet. Fill in the form and press Send to staff.</p>';
+        var sev = sevById[sent.severity] || {};
+        var secs = Math.max(0, Math.floor((Date.now() - sent.at) / 1000));
+        return '<div class="clock"><span class="t" id="mi-clock">' + fmtClock(secs) + '</span>' +
+            '<span class="l">since you reported ' + esc(sent.ticket) + '</span></div>' +
+            '<p class="meta">Urgency: <b>' + esc(sev.label || sent.severity) + '</b>' +
+            (sev.ack_minutes ? '. Staff aim to respond within ' + sev.ack_minutes + ' minutes.' : '.') +
+            ' You will get an email when staff pick it up.</p>';
+    }
+
+    function renderPanel() {
+        var area = selectedArea(), sev = effectiveSeverity(), symIds = selectedSymptoms();
+        var panel = $('#mi-panel').attr('class', 'panel' + (sev ? ' sev-' + sev : ''));
+        var html = '<div class="rail"></div><div class="pbody"><h2>While you wait for staff</h2>' + statusHtml();
+        if (!area) {
+            html += '<p class="panel-empty">Pick a problem area and this panel fills with checks you can run safely until staff reply.</p>';
+        } else {
+            if (sev === 'stop') {
+                html += '<div class="callout"><p><b>Stop the run and call staff now.</b>' +
+                    (STAFF_PHONE ? ' Phone: <a href="tel:' + esc(STAFF_PHONE.replace(/[^\d+]/g, '')) + '">' +
+                     esc(STAFF_PHONE) + '</a>.' : '') + ' Only do the holding actions below.</p></div>';
+            }
+            if (area.staffOnly) {
+                html += '<div class="callout staff"><p><b>Staff action only.</b> Do not try to fix this yourself.</p></div>';
+                html += plainList('Holding actions', area.hold);
+                html += plainList('Write down for staff', area.record);
+            } else {
+                stepGroups(area, symIds).forEach(function (g) {
+                    html += '<div class="group"><h3>' + esc(g.title) + '</h3><ul class="steps">' +
+                        g.steps.map(function (s, i) {
+                            var id = g.id + ':' + i;
+                            return '<li><label><input type="checkbox" data-step="' + esc(id) + '" data-text="' +
+                                esc(s) + '"' + (ticked[id] ? ' checked' : '') + '><span>' + esc(s) +
+                                '</span></label></li>';
+                        }).join('') + '</ul></div>';
+                });
+                html += plainList('Please do not', area.avoid, 'avoid');
+                html += plainList('Write down for staff', area.record);
+            }
+            html += '<p class="foot">If a check changes what you see, tell staff what changed. ' +
+                (sent ? '' : 'Steps you tick are added to "What you have already tried".') + '</p>';
+        }
+        panel.html(html + '</div>');
+    }
+
+    function tickedText() {
+        var lines = [];
+        $('#mi-panel input[data-step]:checked').each(function () { lines.push('- ' + $(this).data('text')); });
+        return lines;
     }
 
     function showErrors(errors, message) {
-        $('#mi-report-form .is-invalid').removeClass('is-invalid');
-        $('#mi-report-form .invalid-feedback').text('').hide();
+        $('#mi-report-form .invalid').removeClass('invalid');
+        $('#mi-report-form .ferr').text('');
         Object.keys(errors || {}).forEach(function (field) {
-            $('#mi-report-form [name=' + field + ']').addClass('is-invalid');
-            $('#mi-report-form .invalid-feedback[data-for=' + field + ']').text(errors[field]).show();
+            $('#mi-report-form [name=' + field + ']').addClass('invalid');
+            $('#mi-report-form .ferr[data-for=' + field + ']').text(errors[field]);
         });
         if (message) $('#mi-form-error').text(message).show(); else $('#mi-form-error').hide();
+    }
+
+    function autoTitle() {
+        var area = selectedArea();
+        if (!area) return '';
+        var labels = [];
+        (area.symptoms || []).forEach(function (s) {
+            if (selectedSymptoms().indexOf(s.id) >= 0) labels.push(s.label);
+        });
+        return (labels.length ? labels.join('; ') : area.label).slice(0, 200);
+    }
+
+    function markSent(issue, severity) {
+        sent = {ticket: issue.ticket, at: Date.now(), severity: issue.severity || severity};
+        $('#mi-fields').prop('disabled', true);
+        $('#mi-lock-text').html('<b>Report ' + esc(issue.ticket) + ' sent.</b> Staff have been notified, ' +
+                                'and you will get an email confirmation.');
+        if (IS_MANAGER) {
+            $('#mi-open-issue').attr('href', ISSUE_URL + '&issue_id=' + issue.id + '&created=1').show();
+        }
+        $('#mi-lock').show();
+        window.scrollTo(0, 0);
+        renderPanel();
+        setInterval(function () {
+            $('#mi-clock').text(fmtClock(Math.max(0, Math.floor((Date.now() - sent.at) / 1000))));
+        }, 1000);
     }
 
     function submit(e) {
@@ -263,17 +405,20 @@
         $('[data-context]').each(function () {
             if ($(this).val()) context[$(this).data('context')] = $(this).val();
         });
+        var tried = $('#mi-tried').val(), checks = tickedText();
+        if (checks.length) tried = (tried ? tried + '\n' : '') + 'Checks done:\n' + checks.join('\n');
+        var severity = $('input[name=severity]:checked').val() || null;
         var payload = {
             idempotency_key: idempotencyKey,
             instrument_id: parseInt($('#mi-instrument').val()) || null,
             problem_area: $('#mi-area').val(),
-            symptoms: $('.mi-symptom:checked').map(function () { return $(this).val(); }).get(),
-            title: $('#mi-title').val(),
+            symptoms: selectedSymptoms(),
+            title: $('#mi-title').val().trim() || autoTitle(),
             description: $('#mi-description').val(),
-            tried: $('#mi-tried').val(),
-            occurred_at: $('#mi-occurred').val() || null,
+            tried: tried,
+            occurred_at: ($('#mi-occurred-row').is(':visible') && $('#mi-occurred').val()) || null,
             contact: $('#mi-contact').val(),
-            severity: $('input[name=severity]:checked').val() || null,
+            severity: severity,
             context: context
         };
         $('#mi-submit').prop('disabled', true);
@@ -282,23 +427,19 @@
             contentType: 'application/json; charset=utf-8', dataType: 'json',
             headers: {'X-MI-CSRF': CSRF}
         }).done(function (data) {
-            var done = function () {
-                // Only managers can open issues; reporters get a confirmation
-                window.location.href = IS_MANAGER
-                    ? ISSUE_URL + '&issue_id=' + data.issue.id + '&created=1'
-                    : REPORT_URL + '&submitted=' + encodeURIComponent(data.issue.ticket);
-            };
+            showErrors({}, null);
             var files = $('#mi-files')[0].files;
-            if (!files.length) return done();
+            if (!files.length) return markSent(data.issue, severity);
             // The report is saved; files are added to it. A failed upload
-            // does not lose the report, the user can add files later.
+            // does not lose the report.
             var form = new FormData();
             for (var i = 0; i < files.length; i++) form.append('file', files[i]);
-            MI.post('/issues/' + data.issue.id + '/attachments', form, done).fail(function () {
-                $('#mi-form-error').removeClass('alert-danger').addClass('alert-warning').text(
-                    'Your report ' + data.issue.ticket + ' was saved, but the files could not be ' +
-                    'uploaded. Please send them to the facility staff by email.').show();
-                setTimeout(done, 4000);
+            MI.post('/issues/' + data.issue.id + '/attachments', form, function () {
+                markSent(data.issue, severity);
+            }, '#mi-form-error').fail(function () {
+                markSent(data.issue, severity);
+                $('#mi-lock-text').append(' <span style="color: var(--block)">The files could not be ' +
+                    'uploaded; please send them to the facility staff by email.</span>');
             });
         }).fail(function (xhr) {
             var body = xhr.responseJSON || {};
@@ -311,29 +452,42 @@
     $.getJSON(META_URL).done(function (data) {
         meta = data;
         data.problem_areas.forEach(function (a) { areasById[a.id] = a; });
-        data.severities.forEach(function (s) { sevRank[s.id] = s.rank; });
+        data.severities.forEach(function (s) { sevById[s.id] = s; });
 
-        var inst = $('#mi-instrument').append(option('', 'Select an instrument...'));
+        var inst = $('#mi-instrument').append(option('', 'Choose instrument'));
         data.instruments.forEach(function (i) { inst.append(option(i.id, i.name)); });
         if (SELECTED) inst.val(String(SELECTED));
 
         var sevBox = $('#mi-severities');
         data.severities.slice().sort(function (a, b) { return b.rank - a.rank; }).forEach(function (s) {
-            sevBox.append($('<label class="custom-control custom-radio d-block">').append(
-                $('<input type="radio" class="custom-control-input" name="severity">').val(s.id),
-                $('<span class="custom-control-label">')
-                    .append($('<strong>').text(s.label), document.createTextNode(' - ' + s.desc))));
+            sevBox.append($('<div class="sev">').addClass('s-' + s.id).append(
+                $('<input type="radio" name="severity">').attr('id', 'mi-sev-' + s.id).val(s.id),
+                $('<label>').attr('for', 'mi-sev-' + s.id).append($('<b>').text(s.label), $('<small>').text(s.desc))));
         });
 
         $('#mi-instrument').on('change', renderAreas);
-        $('#mi-area').on('change', renderArea);
-        $('#mi-report-form').on('change', '.mi-symptom, input[name=severity]', updateBump);
+        $('#mi-area').on('change', renderSymptoms);
+        $('#mi-onset').on('change', function () {
+            var v = $(this).val();
+            $('#mi-occurred-row').toggle(v === 'More than an hour ago' || v === 'Comes and goes');
+        });
+        $('#mi-report-form').on('change', '#mi-symptoms input, input[name=severity]', refresh);
+        $('#mi-panel').on('change', 'input[data-step]', function () {
+            ticked[$(this).data('step')] = this.checked;
+        });
+        $('#mi-reset').on('click', function () {
+            $('#mi-report-form')[0].reset();
+            ticked = {};
+            showErrors({}, null);
+            $('#mi-occurred-row').hide();
+            renderAreas();
+        });
         $('#mi-report-form').on('submit', submit);
         renderAreas();
         $('#mi-loading').hide();
-        $('#mi-report-form').show();
+        $('#mi-fields').prop('disabled', {{ (submitted != '')|tojson }});
     }).fail(function (xhr) {
-        $('#mi-loading').removeClass('text-muted').addClass('text-danger')
+        $('#mi-loading').css('color', 'var(--stop)')
             .text('Could not load the report form (' + xhr.status + '). Please reload the page.');
     });
 })();

@@ -313,7 +313,9 @@ class TestIssues(unittest.TestCase):
                                     resource_id=str(self.krios.resource_id),
                                     submitted=issue['ticket'])
         self.assertNotIn('error-modal-title', html)
-        self.assertIn('your report <strong>%s</strong> was saved' % issue['ticket'], html)
+        self.assertIn('<b>Report %s sent.</b>' % issue['ticket'], html)
+        self.assertIn('id="mi-detector"', html)
+        self.assertIn('id="mi-stype"', html)
 
         for params in ({'content_id': 'mi_issues'},
                        {'content_id': 'mi_issues', 'status': 'all', 'mine': '1'},

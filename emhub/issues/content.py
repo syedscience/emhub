@@ -33,6 +33,8 @@ EMhub pages (content_id -> template) of the Microscope Issues module:
 
 import datetime as dt
 
+import flask_login
+
 from .api import csrf_token
 from .authz import MANAGER, ADMIN, require
 
@@ -106,11 +108,20 @@ def register_content(dc):
         if resource_id := _int(kwargs.get('resource_id')):
             inst = svc.get_instrument(resource_id)
             selected = inst.id if inst and inst.is_reportable else None
+        roles, config = svc.roles(), svc.config()
+        user = flask_login.current_user
+        pi = user.get_pi() if user.is_authenticated else None
         return {
             'selected_instrument_id': selected,
+            # Shown read-only: who is reporting comes from the EMhub login
+            'reporter': {'name': user.name, 'email': user.email or '',
+                         'pi': pi.name if pi and pi != user else ''},
             # Ticket of the report just sent, shown as a confirmation
             'submitted': str(kwargs.get('submitted') or '')[:32],
-            'is_manager': MANAGER in svc.roles(),
+            'is_manager': MANAGER in roles,
+            'is_admin': ADMIN in roles,
+            'facility_name': config.get('facility_name') or 'Cryo-EM Facility',
+            'staff_phone': config.get('staff_phone') or '',
             'csrf_token': csrf_token(),
         }
 

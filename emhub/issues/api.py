@@ -120,6 +120,7 @@ def meta():
         'instruments': instruments,
         'problem_areas': kb['problem_areas'],
         'severities': kb['severities'],
+        'context_options': kb.get('context_options', {}),
         'roles': sorted(roles),
         'csrf_token': csrf_token(),
     })
