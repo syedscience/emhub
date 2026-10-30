@@ -1,0 +1,298 @@
+{% set t = data.totals %}
+{% set cov = data.coverage %}
+
+{% macro fmt_min(v) -%}
+    {%- if v is none -%}n/a{%- elif v < 120 -%}{{ '%.0f'|format(v) }} min{%- else -%}{{ '%.1f'|format(v / 60) }} h{%- endif -%}
+{%- endmacro %}
+{% macro fmt_h(v) -%}
+    {%- if v is none -%}n/a{%- elif v < 48 -%}{{ '%.1f'|format(v) }} h{%- else -%}{{ '%.1f'|format(v / 24) }} days{%- endif -%}
+{%- endmacro %}
+{% macro tile(label, value, note='') -%}
+    <div class="col-xl-3 col-md-4 col-6 mb-3">
+        <div class="card h-100 mb-0">
+            <div class="card-body">
+                <div class="text-muted small">{{ label }}</div>
+                <div class="mi-tile-value">{{ value }}</div>
+                {% if note %}<div class="text-muted small">{{ note }}</div>{% endif %}
+            </div>
+        </div>
+    </div>
+{%- endmacro %}
+
+<style>
+    .mi-insights { --mi-text: #3d405c; --mi-muted: #71748d; --mi-grid: #e6e6f2; --mi-surface: #ffffff;
+                   --mi-series: #2a78d6; }
+    .mi-tile-value { font-size: 26px; font-weight: 600; color: var(--mi-text); line-height: 1.3;
+                     font-variant-numeric: tabular-nums; }
+    .mi-chart { height: 280px; }
+    .mi-insights td.num, .mi-insights th.num { text-align: right; font-variant-numeric: tabular-nums; }
+</style>
+
+<div class="container-fluid dashboard-content mi-insights">
+    {% set title = "Microscope Issues insights" %}
+    {% set about = "Trends, response and restoration times, downtime and backlog." %}
+    {% set navigation = [('Microscope Issues', url_for_content('mi_issues')), ('Insights', '')] %}
+    {% include 'include_header.html' %}
+
+    <div class="card">
+        <div class="card-body py-3">
+            <form class="form-inline" method="get" action="{{ url_for('main') }}" id="mi-insights-filters">
+                <input type="hidden" name="content_id" value="mi_insights">
+                <label class="mr-2" for="mi-i-start">From</label>
+                <input type="date" class="form-control form-control-sm mr-3" id="mi-i-start" name="start" value="{{ filters.start }}">
+                <label class="mr-2" for="mi-i-end">to</label>
+                <input type="date" class="form-control form-control-sm mr-3" id="mi-i-end" name="end" value="{{ filters.end }}">
+                <label class="mr-2" for="mi-i-inst">Instrument</label>
+                <select class="form-control form-control-sm mr-3" id="mi-i-inst" name="instrument_id">
+                    <option value="">All</option>
+                    {% for inst in instruments %}
+                        <option value="{{ inst.id }}" {{ 'selected' if filters.instrument_id == inst.id }}>{{ inst.name }}</option>
+                    {% endfor %}
+                </select>
+                <select class="form-control form-control-sm mr-3" name="imported" aria-label="Imported history">
+                    <option value="1" {{ 'selected' if filters.imported == '1' }}>Include imported history</option>
+                    <option value="0" {{ 'selected' if filters.imported == '0' }}>Reported in EMhub only</option>
+                </select>
+                <button type="submit" class="btn btn-sm btn-primary mr-2">Apply</button>
+                <a class="btn btn-sm btn-outline-secondary ml-auto"
+                   href="{{ url_for('issues_api.export_csv', start=filters.start, end=filters.end,
+                                    instrument_id=filters.instrument_id, imported=filters.imported) }}">
+                    <i class="fas fa-file-csv"></i> Export CSV</a>
+            </form>
+        </div>
+    </div>
+
+    <div class="row">
+        {{ tile('Incidents', t.incidents, (t.duplicates ~ ' duplicate reports not counted') if t.duplicates else 'in the period') }}
+        {{ tile('Open now', t.open_now, (data.backlog.waiting_vendor ~ ' waiting for vendor') if data.backlog.waiting_vendor else '') }}
+        {{ tile('First response, median', fmt_min(t.response_min.median),
+                '90% within ' ~ fmt_min(t.response_min.p90) ~ ' (n=' ~ t.response_min.n ~ ')') }}
+        {{ tile('Restoration, median', fmt_h(t.restoration_h.median),
+                'impact start to restored (n=' ~ t.restoration_h.n ~ ')') }}
+        {{ tile('Unavailable time', '%.1f h'|format(t.downtime_hours), 'merged per instrument') }}
+        {{ tile('Booked time', '%.0f h'|format(t.booked_hours), 'EMhub bookings, not operating hours') }}
+        {{ tile('Fixed by users\' own checks', (('%.0f'|format(t.self_fixed_pct)) ~ '%') if t.self_fixed_pct is not none else 'n/a',
+                'of resolved incidents') }}
+        {{ tile('Escalations', t.escalated, 'not acknowledged in time') }}
+    </div>
+
+    {% if cov.incidents %}
+    <p class="text-muted small">
+        Data coverage: {{ cov.incidents }} incidents{% if cov.imported %}, {{ cov.imported }} imported (excluded from timing){% endif %};
+        {{ cov.without_response }} without a staff response; {{ cov.unresolved }} unresolved (counted as open, not excluded);
+        {{ cov.without_start_time }} without a start time (impact start = report time);
+        {{ cov.unknown_root_cause }} with unknown root cause.
+    </p>
+    {% endif %}
+
+    <div class="row">
+        <div class="col-xl-8 col-12">
+            <div class="card"><div class="card-header"><h5 class="mb-0">Incidents per week, by urgency</h5></div>
+                <div class="card-body"><div id="mi-chart-weeks" class="mi-chart"></div></div></div>
+        </div>
+        <div class="col-xl-4 col-12">
+            <div class="card"><div class="card-header"><h5 class="mb-0">Open issues by age</h5></div>
+                <div class="card-body"><div id="mi-chart-backlog" class="mi-chart"></div></div></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header"><h5 class="mb-0">By instrument</h5>
+            <small class="text-muted">Compare rates, not raw counts: instruments are used differently.</small></div>
+        <div class="card-body">
+            <div class="table-responsive">
+            <table class="table table-sm table-striped mb-0">
+                <thead><tr>
+                    <th>Instrument</th><th class="num">Incidents</th><th class="num">Open</th>
+                    <th class="num">Booked h</th><th class="num">Per 100 booked h</th>
+                    <th class="num">Unavailable h</th><th class="num">Availability</th>
+                    <th class="num">Median response</th><th class="num">Median restoration</th>
+                    <th class="num">Vendor wait</th>
+                </tr></thead>
+                <tbody>
+                {% for r in data.per_instrument %}
+                    <tr>
+                        <td><a href="{{ url_for_content('mi_issues', instrument_id=r.instrument_id, status='all') }}">{{ r.name }}</a></td>
+                        <td class="num">{{ r.incidents }}</td>
+                        <td class="num">{{ r.open }}</td>
+                        <td class="num">{{ '%.0f'|format(r.booked_hours) if r.booked_hours else '-' }}</td>
+                        <td class="num">{{ r.per_100_booked_hours if r.per_100_booked_hours is not none else '-' }}</td>
+                        <td class="num">{{ r.downtime_hours if r.downtime_hours else '-' }}</td>
+                        <td class="num">{{ '%.1f%%'|format(100 * r.availability) if r.availability is not none else '-' }}</td>
+                        <td class="num">{{ fmt_min(r.median_response_min) if r.median_response_min is not none else '-' }}</td>
+                        <td class="num">{{ fmt_h(r.median_restoration_h) if r.median_restoration_h is not none else '-' }}</td>
+                        <td class="num">{{ fmt_h(r.vendor_wait_hours) if r.vendor_wait_hours else '-' }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-xl-6 col-12">
+            <div class="card"><div class="card-header"><h5 class="mb-0">Incidents by problem area</h5></div>
+                <div class="card-body"><div id="mi-chart-areas" class="mi-chart"></div></div></div>
+        </div>
+        <div class="col-xl-6 col-12">
+            <div class="card"><div class="card-header"><h5 class="mb-0">Most reported symptoms</h5></div>
+                <div class="card-body"><div id="mi-chart-symptoms" class="mi-chart"></div></div></div>
+        </div>
+        <div class="col-xl-6 col-12">
+            <div class="card"><div class="card-header"><h5 class="mb-0">Root cause of resolved incidents</h5></div>
+                <div class="card-body"><div id="mi-chart-causes" class="mi-chart"></div></div></div>
+        </div>
+        <div class="col-xl-6 col-12">
+            <div class="card"><div class="card-header"><h5 class="mb-0">How incidents were resolved</h5></div>
+                <div class="card-body"><div id="mi-chart-resolutions" class="mi-chart"></div></div></div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-xl-6 col-12">
+            <div class="card">
+                <div class="card-header"><h5 class="mb-0">Recurring problems</h5>
+                    <small class="text-muted">Same instrument and problem area reported again within 30 days (imported history not included).</small></div>
+                <div class="card-body">
+                    {% if data.recurrence %}
+                    <table class="table table-sm mb-0">
+                        <thead><tr><th>Instrument</th><th>Problem area</th><th class="num">Incidents</th>
+                            <th class="num">Repeats</th><th>Root causes</th></tr></thead>
+                        <tbody>
+                        {% for r in data.recurrence %}
+                            <tr><td>{{ r.instrument }}</td><td>{{ r.problem_area }}</td>
+                                <td class="num">{{ r.issues }}</td><td class="num">{{ r.repeats }}</td>
+                                <td class="small">{% for c, n in r.root_causes.items() %}{{ c }} ({{ n }}){{ ', ' if not loop.last }}{% endfor %}</td></tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                    {% else %}<p class="text-muted mb-0">No repeated problems in this period.</p>{% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-6 col-12">
+            <div class="card">
+                <div class="card-header"><h5 class="mb-0">Oldest open issues</h5></div>
+                <div class="card-body">
+                    {% if data.backlog.oldest %}
+                    <table class="table table-sm mb-0">
+                        <thead><tr><th>Ticket</th><th>Instrument</th><th>Title</th><th>Status</th><th>Assigned</th></tr></thead>
+                        <tbody>
+                        {% for i in data.backlog.oldest %}
+                            <tr><td><a href="{{ url_for_content('mi_issue', issue_id=i.id) }}">{{ i.ticket }}</a></td>
+                                <td>{{ i.instrument_name }}</td><td>{{ i.title }}</td>
+                                <td>{{ i.status|replace('_', ' ') }}</td><td>{{ i.assignee_name or '-' }}</td></tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                    {% else %}<p class="text-muted mb-0">No open issues.</p>{% endif %}
+                    <p class="small text-muted mt-2 mb-0">By owner:
+                        {% for owner, n in data.backlog.by_owner %}{{ owner }} ({{ n }}){{ ', ' if not loop.last }}{% endfor %}</p>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header"><h5 class="mb-0">Notification health</h5></div>
+                <div class="card-body">
+                    {% set failed = outbox.counts.get('failed', 0) %}
+                    {% set waiting = outbox.counts.get('queued', 0) + outbox.counts.get('retrying', 0) %}
+                    <p class="mb-0">
+                        {% if failed %}<i class="fas fa-exclamation-circle text-danger"></i> {{ failed }} failed{% else %}<i class="fas fa-check-circle text-success"></i> No failed messages{% endif %},
+                        {{ waiting }} waiting{% if outbox.oldest_pending %} (oldest {{ outbox.oldest_pending|pretty_datetime }}){% endif %}.
+                        {% if current_user.is_admin %}<a href="{{ url_for_content('mi_settings') }}">Details</a>{% endif %}
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header"><a data-toggle="collapse" href="#mi-definitions"><h5 class="mb-0">How these numbers are calculated</h5></a></div>
+        <div id="mi-definitions" class="collapse"><div class="card-body small">
+            <dl class="mb-0">
+                <dt>Incidents</dt><dd>Issues reported in the period. Reports marked as duplicates are not counted.</dd>
+                <dt>First response</dt><dd>Time from the server receiving the report to the first staff action (acknowledge, comment or change). Elapsed time, not business hours.</dd>
+                <dt>Restoration</dt><dd>From the impact start (the reported start time, or the report time) to the instrument being restored (end of its downtime, or resolution). Independent of when the ticket is closed.</dd>
+                <dt>Unavailable time and availability</dt><dd>Periods staff marked the instrument unavailable, merged so overlapping issues are counted once, clipped to the period. Availability = 1 - unavailable hours / calendar hours.</dd>
+                <dt>Booked hours</dt><dd>EMhub bookings on the instrument in the period (slots, downtime and maintenance excluded). Bookings are not the same as operating hours.</dd>
+                <dt>Imported history</dt><dd>Entries imported from older logbooks count as incidents but are excluded from response and restoration times, because their timestamps are not reliable.</dd>
+            </dl>
+        </div></div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var DATA = {{ {'trend': data.trend, 'by_area': data.by_area, 'top_symptoms': data.top_symptoms,
+                   'root_causes': data.root_causes, 'resolution_types': data.resolution_types,
+                   'backlog_age': data.backlog.by_age}|tojson }};
+    var SEVERITIES = {{ severities|tojson }};
+    var css = getComputedStyle(document.querySelector('.mi-insights'));
+    var C = function (name) { return css.getPropertyValue(name).trim(); };
+    // Urgency is ordered, so it uses one hue light -> dark (more urgent = darker)
+    var URGENCY = {question: '#9ec5f4', degraded: '#5598e7', blocked: '#256abf', stop: '#104281'};
+
+    var base = {
+        credits: {enabled: false}, exporting: {enabled: false}, title: {text: null},
+        chart: {backgroundColor: 'transparent', style: {fontFamily: 'inherit'}, spacing: [8, 8, 8, 8]},
+        legend: {itemStyle: {color: C('--mi-text'), fontWeight: 'normal'}},
+        xAxis: {lineColor: C('--mi-grid'), tickLength: 0, labels: {style: {color: C('--mi-muted')}}},
+        yAxis: {gridLineColor: C('--mi-grid'), title: {text: null}, allowDecimals: false,
+                labels: {style: {color: C('--mi-muted')}}},
+        tooltip: {backgroundColor: '#ffffff', borderColor: C('--mi-grid'), shadow: false,
+                  style: {color: C('--mi-text')}},
+        plotOptions: {series: {borderWidth: 2, borderColor: C('--mi-surface'), borderRadius: 4,
+                               animation: false, states: {inactive: {opacity: 0.5}}}}
+    };
+    function chart(id, options) {
+        if (!document.getElementById(id) || typeof Highcharts === 'undefined') return;
+        Highcharts.chart(id, Highcharts.merge(base, options));
+    }
+    function emptyNote(id, pairs) {
+        if (pairs.length) return false;
+        $('#' + id).removeClass('mi-chart').html('<p class="text-muted mb-0">No data in this period.</p>');
+        return true;
+    }
+    function bars(id, pairs, unit) {
+        if (emptyNote(id, pairs)) return;
+        chart(id, {
+            chart: {type: 'bar', height: Math.max(160, 34 * pairs.length + 40)},
+            xAxis: {categories: pairs.map(function (p) { return p[0]; })},
+            legend: {enabled: false},
+            tooltip: {pointFormat: '<b>{point.y}</b> ' + unit},
+            series: [{name: unit, data: pairs.map(function (p) { return p[1]; }), color: C('--mi-series'),
+                      dataLabels: {enabled: true, style: {color: C('--mi-text'), textOutline: 'none', fontWeight: 'normal'}}}]
+        });
+        $('#' + id).css('height', 'auto');
+    }
+
+    var weeks = DATA.trend.weeks;
+    var order = ['question', 'degraded', 'blocked', 'stop'].filter(function (s) { return s in DATA.trend.by_severity; });
+    chart('mi-chart-weeks', {
+        chart: {type: 'column'},
+        xAxis: {categories: weeks.map(function (w) { return 'w/c ' + w.slice(5); }),
+                labels: {step: Math.max(1, Math.ceil(weeks.length / 12)), rotation: 0}},
+        tooltip: {shared: true},
+        plotOptions: {column: {stacking: 'normal', groupPadding: 0.1, pointPadding: 0.05}},
+        series: order.map(function (s) {
+            return {name: SEVERITIES[s] ? SEVERITIES[s].label : s, color: URGENCY[s],
+                    data: DATA.trend.by_severity[s]};
+        }).reverse()
+    });
+
+    chart('mi-chart-backlog', {
+        chart: {type: 'column'},
+        xAxis: {categories: DATA.backlog_age.map(function (p) { return p[0]; })},
+        legend: {enabled: false},
+        tooltip: {pointFormat: '<b>{point.y}</b> open issues'},
+        series: [{name: 'Open issues', data: DATA.backlog_age.map(function (p) { return p[1]; }),
+                  color: C('--mi-series'),
+                  dataLabels: {enabled: true, style: {color: C('--mi-text'), textOutline: 'none', fontWeight: 'normal'}}}]
+    });
+
+    bars('mi-chart-areas', DATA.by_area, 'incidents');
+    bars('mi-chart-symptoms', DATA.top_symptoms, 'reports');
+    bars('mi-chart-causes', DATA.root_causes, 'incidents');
+    bars('mi-chart-resolutions', DATA.resolution_types, 'incidents');
+})();
+</script>

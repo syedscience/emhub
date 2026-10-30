@@ -82,6 +82,11 @@
                         {% endfor %}
                     </div>
                     {% endif %}
+                    <div class="form-group">
+                        <label for="mi-set-summary">Weekly summary emails (Monday morning)</label>
+                        <input type="text" class="form-control" id="mi-set-summary"
+                               value="{{ (notifications.summary_email or [])|join(', ') }}">
+                    </div>
                     <button type="button" class="btn btn-primary" id="mi-save-settings">Save settings</button>
                 </div>
             </div>
@@ -231,7 +236,8 @@
             notify_reporter: $('#mi-set-notify-reporter').is(':checked'),
             escalation: {email: splitList($('#mi-set-esc-email').val()), webhooks: checked('.mi-set-esc-webhook')},
             routes: routes,
-            ack_minutes: ack
+            ack_minutes: ack,
+            summary_email: splitList($('#mi-set-summary').val())
         }, function () { $('#mi-settings-ok').text('Settings saved.').show(); }, '#mi-settings-error');
     });
 
