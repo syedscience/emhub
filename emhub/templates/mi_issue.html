@@ -121,7 +121,7 @@
                                      ('ev-good' if e.kind in ['resolve', 'close'] else ''))) %}
                         {% set icon = {'comment': 'fa-comment', 'created': 'fa-flag', 'resolve': 'fa-check', 'close': 'fa-check',
                                        'escalated': 'fa-bell', 'reopen': 'fa-redo', 'attachment': 'fa-paperclip',
-                                       'updated': 'fa-pen', 'duplicate': 'fa-clone', 'waiting_vendor': 'fa-truck',
+                                       'updated': 'fa-pencil-alt', 'duplicate': 'fa-clone', 'waiting_vendor': 'fa-truck',
                                        'acknowledge': 'fa-eye', 'investigate': 'fa-search'}.get(e.kind, 'fa-circle') %}
                         <li class="{{ cls }}">
                             <span class="tdot"><i class="fas {{ 'fa-lock' if note else icon }}"></i></span>

@@ -12,7 +12,7 @@
                     for your problem appear on the right while you wait.</p>
             </div>
             {% if staff_phone %}
-                <span class="helpline"><i class="fas fa-phone-alt"></i> Urgent? Call staff on <b>{{ staff_phone }}</b></span>
+                <span class="helpline"><i class="fas fa-phone"></i> Urgent? Call staff on <b>{{ staff_phone }}</b></span>
             {% endif %}
         </div>
         {% set active = 'mi_report' %}
@@ -193,7 +193,7 @@
     var SELECTED = {{ selected_instrument_id|tojson }};
     var TYPE_LABELS = {tem: 'Electron microscopes', fib: 'Cryo-FIB and FIB-SEM', prep: 'Sample preparation',
                        light: 'Light microscopy', other: 'Other instruments'};
-    var TYPE_ICONS = {tem: 'fa-microscope', fib: 'fa-bullseye', prep: 'fa-flask', light: 'fa-lightbulb', other: 'fa-cube'};
+    var TYPE_ICONS = {tem: 'fa-search-plus', fib: 'fa-bullseye', prep: 'fa-flask', light: 'fa-lightbulb', other: 'fa-cube'};
     var AREA_ICONS = {loader: 'fa-box-open', vacuum: 'fa-thermometer-half', beam: 'fa-sun', stage: 'fa-crosshairs',
                       detector: 'fa-camera', filter: 'fa-filter', software: 'fa-desktop', specimen: 'fa-snowflake',
                       quality: 'fa-chart-line', data: 'fa-hdd', emhub_data: 'fa-database',
@@ -255,15 +255,17 @@
     function fillContext() {
         var inst = selectedInstrument();
         $('#mi-session').toggle(!!inst);
+        if (!inst) return;
         $('[data-context]').each(function () {
-            var sel = $(this), field = sel.data('context'), keep = sel.val();
+            var sel = $(this), field = sel.data('context');
+            var keep = sel.data('picked') ? sel.val() : '';  // only keep what the user chose
             var choices = contextChoices(field, inst);
             sel.empty().append(option('', 'Choose...'));
             choices.forEach(function (c) { sel.append(option(c, c)); });
             if (keep && choices.indexOf(keep) >= 0) sel.val(keep);
-            else if (choices.length === 1) sel.val(choices[0]);
             // A field with nothing to choose (e.g. no detector on a Vitrobot) is hidden
             var useless = !choices.length || (choices.length === 1 && /not applicable/i.test(choices[0]));
+            if (useless) sel.val(choices[0] || '');
             $('[data-field=' + field + ']').toggle(!useless);
         });
     }
@@ -601,6 +603,7 @@
         });
         $('#mi-instrument').on('change', renderAreas);
         $('#mi-area').on('change', renderSymptoms);
+        $('[data-context]').on('change', function () { $(this).data('picked', true); });
         $('#mi-onset').on('change', function () {
             var v = $(this).val();
             $('#mi-occurred-row').toggle(v === 'More than an hour ago' || v === 'Comes and goes');
@@ -622,6 +625,7 @@
         $('#mi-reset').on('click', function () {
             $('#mi-report-form')[0].reset();
             $('#mi-instrument, #mi-area').val('');
+            $('[data-context]').data('picked', false);
             ticked = {};
             showErrors({}, null);
             $('#mi-occurred-row').hide();
