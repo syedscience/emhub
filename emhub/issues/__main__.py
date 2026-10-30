@@ -23,9 +23,8 @@
 """
 Command line tool for the Microscope Issues module.
 
-    emh-issues migrate            Create or upgrade the issues database schema
-    emh-issues status             Show database URL and schema revision
-    emh-issues sync-instruments   Copy EMhub resources into the issues database
+    emh-issues status             Show where issues are stored and how many
+    emh-issues instruments        List the EMhub resources and if they accept reports
     emh-issues init-config        Create the 'config:issues' form with defaults
     emh-issues worker [--once]    Send notifications and escalate overdue issues
     emh-issues import-logbooks 219,220 [--map 223=12] [--commit]
@@ -43,24 +42,11 @@ def _app():
     return create_app()
 
 
-def _db(app):
-    from . import get_db_url
-    from .db import IssuesDb
-    return IssuesDb(get_db_url(app))
-
-
-def _safe_url(url):
-    """ Hide the password when printing a database URL. """
-    from sqlalchemy.engine import make_url
-    return make_url(url).render_as_string(hide_password=True)
-
-
 def main():
     p = argparse.ArgumentParser(prog='emh-issues')
     sub = p.add_subparsers(dest='command', required=True)
-    sub.add_parser('migrate', help='Create or upgrade the database schema.')
-    sub.add_parser('status', help='Show the database and schema revision.')
-    sub.add_parser('sync-instruments', help='Copy EMhub resources as instruments.')
+    sub.add_parser('status', help='Show where issues are stored and how many.')
+    sub.add_parser('instruments', help='List the EMhub resources that accept reports.')
     sub.add_parser('init-config', help="Create the 'config:issues' form with defaults.")
     imp = sub.add_parser('import-logbooks', help='Import EMhub logbook entries as history.')
     imp.add_argument('logbooks', help='Comma-separated logbook (project) ids.')
@@ -74,29 +60,29 @@ def main():
     args = p.parse_args()
 
     app = _app()
-    db = _db(app)
+    if app.issues is None and args.command != 'init-config':
+        sys.exit("Set EMHUB_ISSUES = True in the instance config.py first.")
 
-    if args.command == 'migrate':
-        db.migrate()
-        print(f"Issues database at revision {db.current_revision()}: {_safe_url(db.url)}")
-
-    elif args.command == 'status':
-        current, head = db.current_revision(), db.head_revision()
-        print(f"Database: {_safe_url(db.url)}")
-        print(f"Enabled:  {bool(app.config.get('EMHUB_ISSUES', False))}")
-        print(f"Revision: {current} (latest: {head})")
-        if current != head:
-            print("Run 'emh-issues migrate' to upgrade.")
-            sys.exit(1)
-
-    elif args.command == 'sync-instruments':
-        if app.issues is None:
-            sys.exit("Set EMHUB_ISSUES = True in the instance config.py first.")
+    if args.command == 'status':
+        from .store import PROJECT_STATUS
         with app.app_context():
-            app.issues.sync_instruments()
-            for inst in app.issues.instruments(reportable_only=False, sync=False):
+            store = app.issues.store
+            pid = store.existing_project_id()
+            print(f"Storage:  EMhub database, project status '{PROJECT_STATUS}'"
+                  f" (id {pid if pid else 'not created yet'})")
+            if pid:
+                issues = store.issues()
+                open_ = sum(1 for i in issues if i.is_open)
+                pending = len(store.messages(status=['queued', 'retrying', 'sending']))
+                failed = len(store.messages(status='failed'))
+                print(f"Issues:   {len(issues)} ({open_} open)")
+                print(f"Messages: {pending} waiting, {failed} failed")
+
+    elif args.command == 'instruments':
+        with app.app_context():
+            for inst in app.issues.instruments(reportable_only=False):
                 state = 'reportable' if inst.is_reportable else 'not reportable'
-                print(f"{inst.resource_id:4d}  {inst.name:24s} {inst.instrument_type:6s} {state}")
+                print(f"{inst.id:4d}  {inst.name:24s} {inst.instrument_type:6s} {state}")
 
     elif args.command == 'init-config':
         from .service import DEFAULT_CONFIG
@@ -114,8 +100,6 @@ def main():
 
     elif args.command == 'import-logbooks':
         from .importers import import_logbooks
-        if app.issues is None:
-            sys.exit("Set EMHUB_ISSUES = True in the instance config.py first.")
         try:
             ids = [int(x) for x in args.logbooks.split(',') if x.strip()]
             mapping = {int(k): int(v) for k, v in (m.split('=') for m in args.map)}
@@ -136,10 +120,6 @@ def main():
     elif args.command == 'worker':
         import logging
         from .worker import NotificationWorker
-        if app.issues is None:
-            sys.exit("Set EMHUB_ISSUES = True in the instance config.py first.")
-        if not db.is_current():
-            sys.exit("The issues database is not up to date, run 'emh-issues migrate'.")
         logging.basicConfig(level=logging.INFO,
                             format='%(asctime)s %(levelname)s %(message)s')
         worker = NotificationWorker(app)

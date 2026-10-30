@@ -25,7 +25,7 @@ Business logic of the Microscope Issues module.
 
 All reads and writes go through IssuesService, which checks the issue roles
 of the current EMhub user. Pages (content.py) and the JSON API (api.py) are
-thin layers on top of it.
+thin layers on top of it; storage is in store.py (EMhub entries).
 """
 
 import datetime as dt
@@ -35,17 +35,14 @@ import re
 import uuid
 
 import flask
-from sqlalchemy import select, func
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import selectinload
 from werkzeug.utils import secure_filename
 
-from .authz import (user_issue_roles, require, Forbidden,
-                    REPORTER, STAFF, MANAGER, ADMIN)
+from .authz import user_issue_roles, require, Forbidden, REPORTER, MANAGER, ADMIN
 from . import insights as mi_insights
-from .models import (Instrument, Issue, IssueSymptom, IssueEvent,
-                     OutboxMessage, AffectedUser, Attachment,
-                     DowntimeInterval, Notice, AuditEvent, as_utc, utcnow)
+from .models import (Instrument, Issue, IssueSymptom, OutboxMessage,
+                     AffectedUser, Attachment, DowntimeInterval, Notice,
+                     AuditEvent, as_utc, utcnow)
+from .store import Conflict
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 KNOWLEDGE_FILE = os.path.join(HERE, 'knowledge', 'problem_areas.json')
@@ -61,17 +58,17 @@ TYPE_TAGS = [
               'micropatterning', 'freezer'}),
 ]
 
-# action: (allowed current statuses, new status, required role)
+# action: (allowed current statuses, new status); managers only
 TRANSITIONS = {
-    'acknowledge': ({'new', 'reopened'}, 'acknowledged', STAFF),
+    'acknowledge': ({'new', 'reopened'}, 'acknowledged'),
     'investigate': ({'new', 'acknowledged', 'reopened', 'waiting_vendor'},
-                    'investigating', STAFF),
+                    'investigating'),
     'wait_vendor': ({'new', 'acknowledged', 'investigating', 'reopened'},
-                    'waiting_vendor', STAFF),
-    'resolve': (set(Issue.OPEN_STATUSES), 'resolved', STAFF),
-    'close': ({'resolved'}, 'closed', STAFF),
-    'reopen': ({'resolved', 'closed'}, 'reopened', 'participant'),
-    'duplicate': (set(Issue.OPEN_STATUSES), 'duplicate', STAFF),
+                    'waiting_vendor'),
+    'resolve': (set(Issue.OPEN_STATUSES), 'resolved'),
+    'close': ({'resolved'}, 'closed'),
+    'reopen': ({'resolved', 'closed'}, 'reopened'),
+    'duplicate': (set(Issue.OPEN_STATUSES), 'duplicate'),
 }
 
 MAX_FILES_PER_ISSUE = 20
@@ -116,13 +113,13 @@ CONTEXT_FIELDS = ['detector', 'software', 'session_type', 'session_status',
 
 # Default content of the 'config:issues' form (emh-issues init-config)
 DEFAULT_CONFIG = {
-    # Extra EMhub roles mapped to issue roles (see authz.py)
-    'roles': {'staff': [], 'manager': [], 'admin': []},
+    # EMhub resource ids that do not accept reports
+    'disabled_instruments': [],
     'notifications': {
         'email': [],            # facility addresses notified of new issues
         'webhooks': [],         # names of server-side webhooks (ISSUES_WEBHOOKS)
         'receipt_to_reporter': True,
-        'notify_reporter': True,  # email reporters about progress and staff replies
+        'notify_reporter': True,  # email reporters about progress and replies
         'escalation': {'email': [], 'webhooks': []},  # when not acknowledged in time
         'routes': [],           # [{"instruments": [...], "min_severity": "blocked",
                                 #   "email": [...], "webhooks": [...]}]
@@ -142,11 +139,6 @@ class NotFound(Exception):
     pass
 
 
-class Conflict(Exception):
-    """ The issue changed since the user loaded it (optimistic locking). """
-    pass
-
-
 def instrument_type_for(tags, name=''):
     words = set(re.split(r'[\s,]+', f'{tags} {name}'.lower()))
     for itype, keys in TYPE_TAGS:
@@ -163,16 +155,12 @@ def iso(value):
 
 
 class IssuesService:
-    def __init__(self, app, db):
+    def __init__(self, app, store):
         self.app = app
-        self.db = db
+        self.store = store
         self._knowledge = None
 
     # ------------------------- Configuration ---------------------------------
-    @property
-    def session(self):
-        return self.db.session
-
     def config(self):
         """ Module settings from the 'config:issues' form (empty if missing),
         read once per request. """
@@ -186,9 +174,19 @@ class IssuesService:
             flask.g.mi_config = config
         return config
 
+    def _save_config(self, config):
+        dm = self.app.dm
+        form = dm.get_form_by(name='config:issues')
+        if form is None:
+            dm.create_form(name='config:issues', definition=config)
+        else:
+            dm.update_form(id=form.id, definition=config)
+        if flask.has_app_context():
+            flask.g.pop('mi_config', None)
+
     def roles(self, user=None):
         user = user if user is not None else self.app.user
-        return user_issue_roles(user, self.config())
+        return user_issue_roles(user)
 
     def knowledge(self):
         if self._knowledge is None:
@@ -213,51 +211,44 @@ class IssuesService:
                 and (not a.get('only_types') or itype in a['only_types'])]
 
     # ------------------------- Instruments -----------------------------------
-    def sync_instruments(self):
-        """ Mirror EMhub resources into the issues database.
-        Resources are never deleted here; renames keep issue history.
-        """
-        s = self.session
-        existing = {i.resource_id: i for i in s.scalars(select(Instrument))}
-        now = utcnow()
-        for r in self.app.dm.get_resources():
-            inst = existing.get(r.id)
-            if inst is None:
-                inst = Instrument(resource_id=r.id, enabled=True)
-                s.add(inst)
-            inst.name = r.name
-            inst.tags = r.tags or ''
-            inst.instrument_type = instrument_type_for(r.tags, r.name)
-            inst.emhub_status = r.status or 'active'
-            inst.synced_at = now
-        s.commit()
+    def _instrument(self, resource):
+        disabled = set(self.config().get('disabled_instruments') or [])
+        return Instrument(resource, instrument_type_for(resource.tags, resource.name),
+                          enabled=resource.id not in disabled)
 
-    def instruments(self, reportable_only=True, sync=True):
-        if sync:
-            self.sync_instruments()
-        q = select(Instrument).order_by(Instrument.name)
-        items = list(self.session.scalars(q))
+    def instruments(self, reportable_only=True):
+        """ EMhub resources as instruments, by name. """
+        items = sorted((self._instrument(r) for r in self.app.dm.get_resources()),
+                       key=lambda i: i.name)
         if reportable_only:
             items = [i for i in items if i.is_reportable]
         return items
 
-    def get_instrument(self, instrument_id=None, resource_id=None):
-        s = self.session
-        if instrument_id is not None:
-            return s.get(Instrument, int(instrument_id))
-        return s.scalars(select(Instrument).where(
-            Instrument.resource_id == int(resource_id))).first()
+    def get_instrument(self, instrument_id):
+        try:
+            resource = self.app.dm.get_resource_by(id=int(instrument_id))
+        except (TypeError, ValueError):
+            return None
+        return self._instrument(resource) if resource else None
 
     def set_instrument_enabled(self, instrument_id, enabled, user=None):
+        user = user if user is not None else self.app.user
         require(self.roles(user), ADMIN)
-        inst = self.get_instrument(instrument_id=instrument_id)
+        inst = self.get_instrument(instrument_id)
         if inst is None:
             raise NotFound(f'Instrument {instrument_id} not found')
-        inst.enabled = bool(enabled)
-        self._audit(user if user is not None else self.app.user, 'instrument_enabled',
-                    {'instrument': inst.name, 'enabled': inst.enabled})
-        self.session.commit()
-        return inst
+        config = dict(self.config() or DEFAULT_CONFIG)
+        disabled = set(config.get('disabled_instruments') or [])
+        if enabled:
+            disabled.discard(inst.id)
+        else:
+            disabled.add(inst.id)
+        config['disabled_instruments'] = sorted(disabled)
+        self._save_config(config)
+        self._audit(user, 'instrument_enabled', {'instrument': inst.name,
+                                                 'enabled': bool(enabled)})
+        self.store.commit()
+        return self.get_instrument(inst.id)
 
     # ------------------------- Issues ----------------------------------------
     def _clean_text(self, payload, key, errors, required=False):
@@ -296,20 +287,16 @@ class IssuesService:
         user = user if user is not None else self.app.user
         roles = self.roles(user)
         require(roles, REPORTER)
-        s = self.session
 
         key = payload.get('idempotency_key')
         if key is not None:
             key = str(key)[:64]
-            if previous := self._issue_by_key(key):
+            previous = self.store.find_issue(idempotency_key=key)
+            if previous is not None and previous.reporter_id == user.id:
                 return previous
 
         errors = {}
-        inst = None
-        try:
-            inst = self.get_instrument(instrument_id=payload.get('instrument_id'))
-        except (TypeError, ValueError):
-            pass
+        inst = self.get_instrument(payload.get('instrument_id'))
         if inst is None or not inst.is_reportable:
             errors['instrument_id'] = 'Select an instrument that accepts reports.'
 
@@ -371,121 +358,92 @@ class IssuesService:
                       reporter_id=user.id, reporter_name=user.name,
                       reporter_email=user.email or '', contact=contact,
                       occurred_at=occurred_at, reported_at=now,
-                      context=context, resolution={}, idempotency_key=key)
-        issue.symptoms = [IssueSymptom(symptom_id=sy['id'], label=sy['label'])
-                          for sy in symptoms]
-        s.add(issue)
+                      context=context, idempotency_key=key,
+                      symptoms=[IssueSymptom(symptom_id=sy['id'], label=sy['label'])
+                                for sy in symptoms])
+        self.store.new_issue(issue, user)
+        self._add_event(issue, user, 'created',
+                        {'severity': severity, 'bumped_from': bumped_from}, at=now)
+        return self._save(issue, user)
+
+    def _save(self, issue, user=None, commit=True):
+        """ Save the issue with the notifications queued by _add_event. """
+        messages = issue.__dict__.pop('_outbox', [])
         try:
-            s.flush()  # assign issue.id
-            issue.ticket = f'MI-{now.year}-{issue.id:05d}'
-            event = IssueEvent(issue_id=issue.id, at=now, actor_id=user.id,
-                               actor_name=user.name, kind='created',
-                               data={'severity': severity,
-                                     'bumped_from': bumped_from})
-            issue.events.append(event)
-            s.flush()
-            self._notify(issue, event, user)
-            s.commit()
-        except IntegrityError:
-            s.rollback()
-            # A concurrent request with the same key won the race
-            if key and (previous := self._issue_by_key(key)):
-                return previous
+            return self.store.save_issue(issue, user, messages, commit=commit)
+        except Exception:
+            self.store.rollback()
             raise
-        return issue
 
-    def _issue_by_key(self, key):
-        return self.session.scalars(
-            select(Issue).where(Issue.idempotency_key == key)).first()
-
-    def get_issue(self, issue_id, user=None):
-        user = user if user is not None else self.app.user
-        roles = self.roles(user)
-        require(roles, REPORTER)
-        try:
-            issue = self.session.get(Issue, int(issue_id))
-        except (TypeError, ValueError):
-            issue = None
+    def _issue(self, issue_id):
+        issue = self.store.get_issue(issue_id)
         if issue is None:
             raise NotFound(f'Issue {issue_id} not found')
         return issue
+
+    def get_issue(self, issue_id, user=None):
+        """ Issues and their history are for managers only. """
+        require(self.roles(user), MANAGER)
+        return self._issue(issue_id)
 
     def _find_issue(self, ref):
         """ Find an issue by id or ticket number (for duplicate links). """
         ref = str(ref or '').strip()
         if ref.isdigit():
-            return self.session.get(Issue, int(ref))
-        return self.session.scalars(
-            select(Issue).where(Issue.ticket == ref.upper())).first()
+            return self.store.get_issue(int(ref))
+        return self.store.find_issue(ticket=ref.upper())
 
     def list_issues(self, user=None, status=None, instrument_id=None,
                     mine=False, assigned=None, limit=500):
         """ Return issues, newest first. status can be 'open', 'closed',
         a single status or None for all. assigned can be 'me' or 'none'. """
         user = user if user is not None else self.app.user
-        require(self.roles(user), REPORTER)
-        q = select(Issue).order_by(Issue.reported_at.desc(), Issue.id.desc())
+        require(self.roles(user), MANAGER)
         if status == 'open':
-            q = q.where(Issue.status.in_(Issue.OPEN_STATUSES))
+            items = self.store.issues(status=Issue.OPEN_STATUSES)
         elif status == 'closed':
-            q = q.where(Issue.status.not_in(Issue.OPEN_STATUSES))
+            items = [i for i in self.store.issues() if not i.is_open]
         elif status:
-            q = q.where(Issue.status == status)
+            items = self.store.issues(status=status)
+        else:
+            items = self.store.issues()
         if instrument_id:
-            q = q.where(Issue.instrument_id == int(instrument_id))
+            items = [i for i in items if i.instrument_id == int(instrument_id)]
         if mine:
-            q = q.where(Issue.reporter_id == user.id)
+            items = [i for i in items if i.reporter_id == user.id]
         if assigned == 'me':
-            q = q.where(Issue.assignee_id == user.id)
+            items = [i for i in items if i.assignee_id == user.id]
         elif assigned == 'none':
-            q = q.where(Issue.assignee_id.is_(None))
-        return list(self.session.scalars(q.limit(limit)))
+            items = [i for i in items if i.assignee_id is None]
+        items.sort(key=lambda i: (as_utc(i.reported_at), i.id), reverse=True)
+        return items[:limit]
 
     def counts(self):
         """ Open issues per instrument id (for badges). """
-        q = (select(Issue.instrument_id, func.count())
-             .where(Issue.status.in_(Issue.OPEN_STATUSES))
-             .group_by(Issue.instrument_id))
-        return dict(self.session.execute(q).all())
-
-    def duplicates(self, instrument_id, problem_area=None, user=None):
-        """ Open issues on the same instrument, same problem area first,
-        so reporters can join an existing issue instead of a new one. """
-        require(self.roles(user), REPORTER)
-        q = (select(Issue)
-             .where(Issue.instrument_id == int(instrument_id),
-                    Issue.status.in_(Issue.OPEN_STATUSES))
-             .order_by(Issue.reported_at.desc()).limit(20))
-        items = list(self.session.scalars(q))
-        items.sort(key=lambda i: i.problem_area != problem_area)
-        return items
+        counts = {}
+        for i in self.store.issues(status=Issue.OPEN_STATUSES):
+            counts[i.instrument_id] = counts.get(i.instrument_id, 0) + 1
+        return counts
 
     # ------------------------- Workflow --------------------------------------
-    def is_participant(self, issue, user=None, roles=None):
-        """ Staff, the reporter and users who joined the issue. """
-        user = user if user is not None else self.app.user
-        roles = roles if roles is not None else self.roles(user)
-        return (STAFF in roles or issue.reporter_id == user.id
-                or any(a.user_id == user.id for a in issue.affected))
-
     def _check_version(self, issue, payload):
         version = payload.get('version')
         if version is None or str(version) != str(issue.version):
             raise Conflict()
 
     def _add_event(self, issue, user, kind, data=None, internal=False, at=None):
+        """ Add an event to the issue history and queue its notifications
+        (saved by _save, in the same transaction). """
         roles = self.roles(user) if user is not None else set()
         data = dict(data or {})
-        if STAFF in roles:
-            data['by_staff'] = True
-        event = IssueEvent(issue_id=issue.id, at=at or utcnow(),
-                           actor_id=getattr(user, 'id', None),
-                           actor_name=getattr(user, 'name', None) or 'EMhub',
-                           kind=kind, data=data, internal=internal)
-        issue.events.append(event)  # keep the loaded history up to date
-        self.session.flush()
+        if MANAGER in roles:
+            data['by_manager'] = True
+        event = issue.add_event(at=at or utcnow(), actor_id=getattr(user, 'id', None),
+                                actor_name=getattr(user, 'name', None) or 'EMhub',
+                                kind=kind, data=data, internal=internal)
         if not internal:
-            self._notify(issue, event, user)
+            issue.__dict__.setdefault('_outbox', []).extend(
+                self._notify(issue, event, user))
         return event
 
     def transition(self, issue_id, action, payload=None, user=None):
@@ -493,18 +451,12 @@ class IssuesService:
         new -> acknowledged -> investigating -> waiting_vendor -> resolved
         -> closed, plus reopen and duplicate. """
         user = user if user is not None else self.app.user
-        roles = self.roles(user)
         payload = payload or {}
         issue = self.get_issue(issue_id, user)
 
         if action not in TRANSITIONS:
             raise ValidationError({'action': f"Unknown action '{action}'."})
-        allowed_from, new_status, role = TRANSITIONS[action]
-        if role == 'participant':
-            if not self.is_participant(issue, user, roles):
-                raise Forbidden('Only staff or people affected by this issue can do this.')
-        else:
-            require(roles, role)
+        allowed_from, new_status = TRANSITIONS[action]
         if issue.status not in allowed_from:
             raise ValidationError({'action': f"Cannot {action.replace('_', ' ')} "
                                              f"an issue that is {issue.status}."})
@@ -514,6 +466,7 @@ class IssuesService:
         old_status = issue.status
         data = {'from': old_status, 'to': new_status}
         errors = {}
+        target = None
 
         if action == 'resolve':
             resolution = self._clean_resolution(payload, errors)
@@ -543,6 +496,7 @@ class IssuesService:
             issue.duplicate_of_id = target.id
             issue.closed_at = now
             data['duplicate_of'] = target.ticket
+            # The reporter of the duplicate follows the original issue
             self._add_affected(target, issue.reporter_id, issue.reporter_name,
                                issue.reporter_email)
             self._add_event(target, user, 'duplicate_merged',
@@ -553,16 +507,17 @@ class IssuesService:
                 issue.resolution = dict(issue.resolution or {}, vendor_ref=vendor_ref)
                 data['vendor_ref'] = vendor_ref
 
-        # The first staff action counts as the acknowledgement
-        if STAFF in roles and issue.acknowledged_at is None and action != 'reopen':
+        # The first manager action counts as the acknowledgement
+        if issue.acknowledged_at is None and action != 'reopen':
             issue.acknowledged_at = now
         if action == 'acknowledge' and issue.assignee_id is None:
             issue.assignee_id, issue.assignee_name = user.id, user.name
 
         issue.status = new_status
         self._add_event(issue, user, action if action != 'wait_vendor' else 'waiting_vendor', data)
-        self.session.commit()
-        return issue
+        if target is not None:
+            self._save(target, user, commit=False)
+        return self._save(issue, user)
 
     def _clean_resolution(self, payload, errors):
         kb = self.knowledge()
@@ -601,10 +556,8 @@ class IssuesService:
         return when
 
     def update_issue(self, issue_id, payload, user=None):
-        """ Staff changes: severity, assignee and instrument state. """
+        """ Manager changes: severity, assignee and instrument state. """
         user = user if user is not None else self.app.user
-        roles = self.roles(user)
-        require(roles, STAFF)
         issue = self.get_issue(issue_id, user)
         self._check_version(issue, payload)
         changes, errors = {}, {}
@@ -624,16 +577,16 @@ class IssuesService:
                     changes['assignee'] = [issue.assignee_name, None]
                     issue.assignee_id = issue.assignee_name = None
             else:
-                staff = {u['id']: u for u in self.staff_users()}
+                managers = {u['id']: u for u in self.manager_users()}
                 try:
                     aid = int(aid)
                 except (TypeError, ValueError):
                     aid = None
-                if aid not in staff:
-                    errors['assignee_id'] = 'Select a staff member.'
+                if aid not in managers:
+                    errors['assignee_id'] = 'Select an EMhub manager.'
                 elif aid != issue.assignee_id:
-                    changes['assignee'] = [issue.assignee_name, staff[aid]['name']]
-                    issue.assignee_id, issue.assignee_name = aid, staff[aid]['name']
+                    changes['assignee'] = [issue.assignee_name, managers[aid]['name']]
+                    issue.assignee_id, issue.assignee_name = aid, managers[aid]['name']
 
         if 'instrument_state' in payload and payload['instrument_state'] != issue.instrument_state:
             state = payload['instrument_state']
@@ -646,13 +599,12 @@ class IssuesService:
                     self._set_instrument_state(issue, state, at)
 
         if errors:
-            self.session.rollback()
             raise ValidationError(errors)
         if changes:
             if issue.acknowledged_at is None:
                 issue.acknowledged_at = now
             self._add_event(issue, user, 'updated', {'changes': changes})
-            self.session.commit()
+            self._save(issue, user)
         return issue
 
     def _set_instrument_state(self, issue, state, at):
@@ -666,22 +618,18 @@ class IssuesService:
         issue.instrument_state = state
 
     def add_comment(self, issue_id, text, internal=False, user=None):
+        """ A reply (emailed to the reporter) or an internal note. """
         user = user if user is not None else self.app.user
-        roles = self.roles(user)
         issue = self.get_issue(issue_id, user)
-        if internal:
-            require(roles, STAFF)
-        elif not self.is_participant(issue, user, roles):
-            raise Forbidden('Join the issue ("I am also affected") to comment on it.')
         text = str(text or '').strip()
         if not text:
             raise ValidationError({'text': 'Write a comment.'})
         if len(text) > 5000:
             raise ValidationError({'text': 'Must be at most 5000 characters.'})
-        if STAFF in roles and not internal and issue.acknowledged_at is None:
+        if not internal and issue.acknowledged_at is None:
             issue.acknowledged_at = utcnow()
         event = self._add_event(issue, user, 'comment', {'text': text}, internal=bool(internal))
-        self.session.commit()
+        self._save(issue, user)
         return event
 
     def _add_affected(self, issue, user_id, name, email):
@@ -691,25 +639,11 @@ class IssuesService:
                                            user_email=email or ''))
         return True
 
-    def join_issue(self, issue_id, user=None):
-        """ 'I am also affected': follow an open issue instead of reporting
-        a duplicate. """
-        user = user if user is not None else self.app.user
-        require(self.roles(user), REPORTER)
-        issue = self.get_issue(issue_id, user)
-        if not issue.is_open:
-            raise ValidationError({'issue': 'This issue is no longer open.'})
-        if self._add_affected(issue, user.id, user.name, user.email):
-            self._add_event(issue, user, 'affected', internal=True)
-            self.session.commit()
-        return issue
-
-    def staff_users(self):
-        """ Active EMhub users with the staff issue role (assignees). """
-        config = self.config()
+    def manager_users(self):
+        """ Active EMhub managers (possible assignees). """
         return sorted(({'id': u.id, 'name': u.name, 'email': u.email}
                        for u in self.app.dm.get_users()
-                       if STAFF in user_issue_roles(_AsUser(u), config)),
+                       if u.is_active and u.is_manager),
                       key=lambda u: u['name'])
 
     # ------------------------- Attachments -----------------------------------
@@ -718,13 +652,16 @@ class IssuesService:
             self.app.instance_path, 'issue_files')
 
     def add_attachment(self, issue_id, filename, stream, internal=False, user=None):
+        """ Managers add files to any issue; reporters only to their own
+        reports (e.g. screenshots sent with the report). """
         user = user if user is not None else self.app.user
         roles = self.roles(user)
-        issue = self.get_issue(issue_id, user)
-        if internal:
-            require(roles, STAFF)
-        elif not self.is_participant(issue, user, roles):
-            raise Forbidden('Only staff or people affected by this issue can add files.')
+        issue = self._issue(issue_id)
+        if MANAGER not in roles:
+            if issue.reporter_id != user.id:
+                raise Forbidden('You can only add files to your own reports.')
+            if internal:
+                raise Forbidden('Only managers can add internal files.')
         if len(issue.attachments) >= MAX_FILES_PER_ISSUE:
             raise ValidationError({'file': f'At most {MAX_FILES_PER_ISSUE} files per issue.'})
 
@@ -742,56 +679,48 @@ class IssuesService:
             raise ValidationError({'file': 'Allowed files: images (PNG, JPEG, GIF), PDF '
                                            'and text logs (TXT, LOG, CSV, JSON).'})
 
-        stored = uuid.uuid4().hex
+        att = Attachment(id=uuid.uuid4().hex, filename=safe[:256],
+                         content_type=content_type, size=len(data),
+                         internal=bool(internal), uploaded_by_id=user.id,
+                         uploaded_by_name=user.name)
         folder = os.path.join(self.files_folder(), str(issue.id))
         os.makedirs(folder, exist_ok=True)
-        path = os.path.join(folder, stored)
+        path = os.path.join(folder, att.id)
         with open(path, 'wb') as f:
             f.write(data)
         try:
-            att = Attachment(filename=safe[:256], stored_name=stored,
-                             content_type=content_type, size=len(data),
-                             internal=bool(internal), uploaded_by_id=user.id,
-                             uploaded_by_name=user.name)
             issue.attachments.append(att)
             self._add_event(issue, user, 'attachment', {'filename': att.filename},
                             internal=True)
-            self.session.commit()
+            self._save(issue, user)
         except Exception:
-            self.session.rollback()
             os.remove(path)
             raise
         return att
 
-    def get_attachment(self, attachment_id, user=None):
-        """ Return (attachment, path) if the user may download it. """
-        user = user if user is not None else self.app.user
-        roles = self.roles(user)
-        require(roles, REPORTER)
-        att = self.session.get(Attachment, int(attachment_id))
+    def get_attachment(self, issue_id, attachment_id, user=None):
+        """ Return (attachment, path); managers only. """
+        issue = self.get_issue(issue_id, user)
+        att = next((a for a in issue.attachments if a.id == str(attachment_id)), None)
         if att is None:
             raise NotFound('File not found')
-        issue = self.session.get(Issue, att.issue_id)
-        if att.internal and STAFF not in roles:
-            raise NotFound('File not found')
-        if not self.is_participant(issue, user, roles):
-            raise Forbidden('Only staff or people affected by this issue can see its files.')
-        return att, os.path.join(self.files_folder(), str(issue.id), att.stored_name)
+        return att, os.path.join(self.files_folder(), str(issue.id), att.id)
 
     # ------------------------- Notices ---------------------------------------
     def notices(self, instrument_id=None):
-        """ Active, unexpired notices (for one instrument plus global ones). """
+        """ Active, unexpired notices (for one instrument plus global ones),
+        shown to everyone on the report form. """
         now = utcnow()
-        q = select(Notice).where(Notice.active.is_(True)).order_by(Notice.created_at.desc())
-        items = [n for n in self.session.scalars(q)
+        items = [n for n in self.store.notices(active=True)
                  if n.expires_at is None or as_utc(n.expires_at) > now]
         if instrument_id:
             items = [n for n in items if n.instrument_id in (None, int(instrument_id))]
+        items.sort(key=lambda n: as_utc(n.created_at), reverse=True)
         return items
 
     def create_notice(self, payload, user=None):
         user = user if user is not None else self.app.user
-        require(self.roles(user), STAFF)
+        require(self.roles(user), MANAGER)
         errors = {}
         message = str(payload.get('message') or '').strip()
         if not message or len(message) > 1000:
@@ -799,13 +728,10 @@ class IssuesService:
         level = payload.get('level') or 'warning'
         if level not in Notice.LEVELS:
             errors['level'] = 'Unknown level.'
-        inst_id = payload.get('instrument_id') or None
-        if inst_id is not None:
-            try:
-                if self.get_instrument(instrument_id=inst_id) is None:
-                    raise ValueError
-                inst_id = int(inst_id)
-            except (TypeError, ValueError):
+        inst = None
+        if payload.get('instrument_id'):
+            inst = self.get_instrument(payload['instrument_id'])
+            if inst is None:
                 errors['instrument_id'] = 'Unknown instrument.'
         expires = None
         if payload.get('expires_at'):
@@ -818,36 +744,40 @@ class IssuesService:
                 errors['expires_at'] = 'Invalid date/time.'
         if errors:
             raise ValidationError(errors)
-        notice = Notice(instrument_id=inst_id, message=message, level=level,
+        notice = Notice(instrument_id=inst.id if inst else None,
+                        instrument_name=inst.name if inst else None,
+                        message=message, level=level,
                         created_by_name=user.name, expires_at=expires)
-        self.session.add(notice)
-        self._audit(user, 'notice_created', {'message': message, 'instrument_id': inst_id})
-        self.session.commit()
+        self.store.add_notice(notice, user)
+        self._audit(user, 'notice_created', {'message': message,
+                                             'instrument_id': notice.instrument_id})
+        self.store.commit()
         return notice
 
     def deactivate_notice(self, notice_id, user=None):
         user = user if user is not None else self.app.user
-        require(self.roles(user), STAFF)
-        notice = self.session.get(Notice, int(notice_id))
+        require(self.roles(user), MANAGER)
+        notice = next((n for n in self.store.notices() if str(n.id) == str(notice_id)), None)
         if notice is None:
             raise NotFound('Notice not found')
         notice.active = False
+        self.store.save_notice(notice)
         self._audit(user, 'notice_removed', {'id': notice.id})
-        self.session.commit()
+        self.store.commit()
         return notice
 
     def notice_json(self, n):
         return {'id': n.id, 'message': n.message, 'level': n.level,
                 'instrument_id': n.instrument_id,
-                'instrument_name': n.instrument.name if n.instrument else None,
+                'instrument_name': n.instrument_name,
                 'created_by_name': n.created_by_name,
                 'created_at': iso(n.created_at), 'expires_at': iso(n.expires_at)}
 
     # ------------------------- Settings and notifications --------------------
     def _audit(self, user, action, data):
-        self.session.add(AuditEvent(actor_id=getattr(user, 'id', None),
-                                    actor_name=getattr(user, 'name', '') or '',
-                                    action=action, data=data))
+        self.store.add_audit(AuditEvent(actor_id=getattr(user, 'id', None),
+                                        actor_name=getattr(user, 'name', '') or '',
+                                        action=action, data=data), user)
 
     def webhook_names(self):
         """ Webhook endpoints are secrets: their URLs are only defined on the
@@ -919,7 +849,7 @@ class IssuesService:
                 notif['ack_minutes'][sid] = int(minutes)
             except (TypeError, ValueError):
                 errors['ack_minutes'] = 'Minutes must be between 1 and 10080.'
-        names = {i.name for i in self.instruments(reportable_only=False, sync=False)}
+        names = {i.name for i in self.instruments(reportable_only=False)}
         for i, route in enumerate(payload.get('routes') or []):
             key = f'routes.{i}'
             insts = [n for n in (route.get('instruments') or []) if n]
@@ -936,18 +866,11 @@ class IssuesService:
         if errors:
             raise ValidationError(errors)
 
-        dm = self.app.dm
         config = dict(self.config() or DEFAULT_CONFIG)
         config['notifications'] = notif
-        form = dm.get_form_by(name='config:issues')
-        if form is None:
-            dm.create_form(name='config:issues', definition=config)
-        else:
-            dm.update_form(id=form.id, definition=config)
-        if flask.has_app_context():
-            flask.g.pop('mi_config', None)
+        self._save_config(config)
         self._audit(user, 'settings_saved', {'notifications': notif})
-        self.session.commit()
+        self.store.commit()
         return notif
 
     def send_test(self, channel, destination, user=None):
@@ -960,43 +883,50 @@ class IssuesService:
             raise ValidationError({'destination': 'Unknown webhook.'})
         if channel not in ('email', 'webhook'):
             raise ValidationError({'channel': 'Unknown channel.'})
-        msg = OutboxMessage(kind='test', channel=channel, destination=destination,
-                            dedupe_key=f'test:{uuid.uuid4().hex}')
-        self.session.add(msg)
+        msg = self.store.add_message(OutboxMessage(
+            kind='test', channel=channel, destination=destination,
+            dedupe_key=f'test:{uuid.uuid4().hex}'))
         self._audit(user, 'test_sent', {'channel': channel, 'destination': destination})
-        self.session.commit()
+        self.store.commit()
         return msg
 
     def outbox_summary(self, user=None, check_access=True):
         if check_access:
             require(self.roles(user), ADMIN)
-        s = self.session
-        counts = dict(s.execute(select(OutboxMessage.status, func.count())
-                                .group_by(OutboxMessage.status)).all())
-        recent = list(s.scalars(select(OutboxMessage)
-                                .where(OutboxMessage.status != 'accepted')
-                                .order_by(OutboxMessage.id.desc()).limit(50)))
-        oldest = s.scalars(select(func.min(OutboxMessage.created_at))
-                           .where(OutboxMessage.status.in_(['queued', 'retrying']))).first()
-        return {'counts': counts, 'messages': recent, 'oldest_pending': as_utc(oldest)}
+        messages = self.store.messages()
+        counts = {}
+        for m in messages:
+            counts[m.status] = counts.get(m.status, 0) + 1
+        recent = [m for m in reversed(messages) if m.status != 'accepted'][:50]
+        pending = [as_utc(m.created_at) for m in messages if m.status in ('queued', 'retrying')]
+        return {'counts': counts, 'messages': recent,
+                'oldest_pending': min(pending) if pending else None}
 
     def retry_message(self, message_id, user=None):
         user = user if user is not None else self.app.user
         require(self.roles(user), ADMIN)
-        msg = self.session.get(OutboxMessage, int(message_id))
+        try:
+            msg = self.store.get_message(int(message_id))
+        except (TypeError, ValueError):
+            msg = None
         if msg is None:
             raise NotFound('Message not found')
         if msg.status not in ('failed', 'skipped'):
             raise ValidationError({'status': 'Only failed messages can be retried.'})
         msg.status, msg.attempts, msg.next_attempt_at = 'queued', 0, utcnow()
+        self.store.save_message(msg)
         self._audit(user, 'message_retried', {'id': msg.id})
-        self.session.commit()
+        self.store.commit()
         return msg
 
     def _notify(self, issue, event, actor=None):
-        """ Queue one outbox message per recipient in the same transaction as
-        the event. The worker delivers them, so a mail or Teams outage never
-        blocks or loses a report. """
+        """ Return one outbox message per recipient, saved in the same
+        transaction as the event. The worker delivers them, so a mail or
+        Teams outage never blocks or loses a report.
+
+        Channels: 'email' (facility, routes, escalation), 'reporter' (the
+        reporter and reporters of duplicates; these emails carry no link,
+        reporters cannot open the issue pages) and 'webhook' (Teams). """
         notif = self.notification_settings()
         severities = self.severities()
         rank = severities.get(issue.severity, {}).get('rank', 0)
@@ -1016,34 +946,28 @@ class IssuesService:
                 targets += [('email', e) for e in route.get('email', [])]
                 targets += [('webhook', w) for w in route.get('webhooks', [])]
             if notif.get('receipt_to_reporter', True) and issue.reporter_email:
-                targets.append(('receipt', issue.reporter_email))
+                targets.append(('reporter', issue.reporter_email))
         elif kind == 'escalated':
             esc = notif.get('escalation') or {}
             targets += [('email', e) for e in esc.get('email', [])]
             targets += [('webhook', w) for w in esc.get('webhooks', [])]
-        elif kind in ('acknowledge', 'resolve', 'reopen', 'duplicate'):
+        elif kind in ('acknowledge', 'resolve', 'reopen', 'duplicate', 'comment'):
             if notif.get('notify_reporter', True):
-                targets += [('email', e) for e in people if e]
+                targets += [('reporter', e) for e in people if e]
             if kind in ('resolve', 'reopen'):
                 targets += [('webhook', w) for w in notif['webhooks']]
-        elif kind == 'comment':
-            if event.data.get('by_staff'):
-                if notif.get('notify_reporter', True):
-                    targets += [('email', e) for e in people if e]
-            else:
-                staff_emails = []
-                if issue.assignee_id:
-                    staff_emails = [u['email'] for u in self.staff_users()
-                                    if u['id'] == issue.assignee_id]
-                targets += [('email', e) for e in (staff_emails or notif['email'])]
 
+        messages = []
         for channel, dest in dict.fromkeys(targets):
-            if channel == 'email' and dest == actor_email:
-                continue  # nobody needs an email about their own action
-            self.session.add(OutboxMessage(
+            # Nobody needs an email about their own action (the receipt of
+            # a report is the exception)
+            if channel != 'webhook' and dest == actor_email and kind != 'created':
+                continue
+            messages.append(OutboxMessage(
                 issue_id=issue.id, event_id=event.id, kind=kind, channel=channel,
                 destination=dest,
                 dedupe_key=f'{issue.id}:{event.id}:{channel}:{dest}'[:128]))
+        return messages
 
     def escalate_overdue(self, now=None):
         """ Re-alert the escalation contacts about issues that nobody
@@ -1056,8 +980,7 @@ class IssuesService:
         esc = notif.get('escalation') or {}
         contacts = len(esc.get('email', [])) + len(esc.get('webhooks', []))
         count = 0
-        q = select(Issue).where(Issue.status.in_(['new', 'reopened']))
-        for issue in self.session.scalars(q):
+        for issue in self.store.issues(status=['new', 'reopened']):
             start, escalated = None, False
             for e in issue.events:
                 if e.kind in ('created', 'reopen'):
@@ -1071,8 +994,11 @@ class IssuesService:
                 self._add_event(issue, None, 'escalated',
                                 {'after_minutes': ack.get(issue.severity, 30),
                                  'contacts': contacts}, at=now)
+                try:
+                    self._save(issue)
+                except Conflict:  # changed meanwhile, check again next time
+                    continue
                 count += 1
-        self.session.commit()
         return count
 
     # ------------------------- Insights --------------------------------------
@@ -1102,44 +1028,35 @@ class IssuesService:
             raise ValidationError({'start': 'The period can be at most 10 years.'})
         return start_dt, end_dt
 
+    def _select(self, issues, instrument_id=None, include_imported=True):
+        return [i for i in issues
+                if (not instrument_id or i.instrument_id == int(instrument_id))
+                and (include_imported or not i.imported)]
+
     def _period_issues(self, start, end, instrument_id=None, include_imported=True):
-        q = (select(Issue)
-             .options(selectinload(Issue.events), selectinload(Issue.downtimes),
-                      selectinload(Issue.symptoms))
-             .where(Issue.reported_at >= start, Issue.reported_at < end)
-             .order_by(Issue.reported_at))
-        if instrument_id:
-            q = q.where(Issue.instrument_id == int(instrument_id))
-        if not include_imported:
-            q = q.where(Issue.imported.is_(False))
-        return list(self.session.scalars(q))
+        issues = [i for i in self.store.issues()
+                  if start <= as_utc(i.reported_at) < end]
+        issues.sort(key=lambda i: as_utc(i.reported_at))
+        return self._select(issues, instrument_id, include_imported)
 
     def insights(self, start, end, instrument_id=None, include_imported=True,
                  user=None, now=None, check_access=True):
         """ Compute the insights for the period (managers only; the worker
         calls it with check_access=False for the weekly summary). """
         if check_access:
-            user = user if user is not None else self.app.user
             require(self.roles(user), MANAGER)
         now = now or utcnow()
         issues = self._period_issues(start, end, instrument_id, include_imported)
+        open_issues = self._select(self.store.issues(status=Issue.OPEN_STATUSES),
+                                   instrument_id, include_imported)
 
-        q = (select(Issue).options(selectinload(Issue.events))
-             .where(Issue.status.in_(Issue.OPEN_STATUSES)))
-        if instrument_id:
-            q = q.where(Issue.instrument_id == int(instrument_id))
-        if not include_imported:
-            q = q.where(Issue.imported.is_(False))
-        open_issues = list(self.session.scalars(q))
-
-        instruments = self.instruments(reportable_only=False, sync=False)
         reported = {i.instrument_id for i in issues} | {i.instrument_id for i in open_issues}
-        shown = {i.id: i.name for i in instruments
+        shown = {i.id: i.name for i in self.instruments(reportable_only=False)
                  if (i.is_reportable or i.id in reported)
                  and (not instrument_id or i.id == int(instrument_id))}
         by_resource = mi_insights.booked_hours_by_resource(
             self.app.dm.get_bookings(), start, end)
-        booked = {i.id: by_resource.get(i.resource_id, 0.0) for i in instruments if i.id in shown}
+        booked = {iid: by_resource.get(iid, 0.0) for iid in shown}
 
         return mi_insights.compute(
             issues, open_issues, shown, start, end, now, self.app.dm.timezone,
@@ -1157,13 +1074,10 @@ class IssuesService:
                       'imported', 'reporter', 'reporter_email']
 
     def export_rows(self, start, end, instrument_id=None, include_imported=True, user=None):
-        """ Rows for the CSV export (managers). Reporter identity is only
-        included for staff, as on the pages. """
-        user = user if user is not None else self.app.user
-        roles = self.roles(user)
-        require(roles, MANAGER)
+        """ Rows for the CSV export (managers only). """
+        require(self.roles(user), MANAGER)
         areas = {a['id']: a['label'] for a in self.problem_areas()}
-        tickets = dict(self.session.execute(select(Issue.id, Issue.ticket)).all())
+        tickets = {i.id: i.ticket for i in self.store.issues()}
         tz = self.app.dm.timezone
         now = utcnow()
 
@@ -1185,7 +1099,7 @@ class IssuesService:
                 restored = max(ends) if ends else as_utc(i.resolved_at)
                 restoration = round(max(0, (restored - as_utc(i.occurred_at or i.reported_at))
                                         .total_seconds() / 3600), 2)
-            row = {
+            rows.append({
                 'ticket': i.ticket, 'reported_at': _t(i.reported_at),
                 'occurred_at': _t(i.occurred_at), 'acknowledged_at': _t(i.acknowledged_at),
                 'resolved_at': _t(i.resolved_at), 'closed_at': _t(i.closed_at),
@@ -1206,10 +1120,9 @@ class IssuesService:
                 'vendor_ref': res.get('vendor_ref', ''),
                 'duplicate_of': tickets.get(i.duplicate_of_id, ''),
                 'imported': 'yes' if i.imported else '',
-                'reporter': i.reporter_name if STAFF in roles else '',
-                'reporter_email': i.reporter_email if STAFF in roles else '',
-            }
-            rows.append(row)
+                'reporter': i.reporter_name,
+                'reporter_email': i.reporter_email,
+            })
         return rows
 
     def enqueue_weekly_summary(self, now=None):
@@ -1229,35 +1142,27 @@ class IssuesService:
         count = 0
         for dest in recipients:
             key = f'summary:{week}:{dest}'[:128]
-            exists = self.session.scalars(select(OutboxMessage.id).where(
-                OutboxMessage.dedupe_key == key)).first()
-            if exists:
+            if self.store.message_exists(key):
                 continue
-            self.session.add(OutboxMessage(
+            self.store.add_message(OutboxMessage(
                 kind='summary', channel='email', destination=dest, dedupe_key=key,
                 payload={'start': start.date().isoformat(),
                          'end': (start.date() + dt.timedelta(days=6)).isoformat(),
                          'week': week}))
-            try:
-                self.session.commit()
-                count += 1
-            except IntegrityError:  # another worker queued it first
-                self.session.rollback()
+            count += 1
+        self.store.commit()
         return count
 
     # ------------------------- Serialization ---------------------------------
-    def can_see_private(self, issue, user=None, roles=None):
-        """ Reporter contact details and internal notes are only visible
-        to staff and to the reporter of the issue. """
-        user = user if user is not None else self.app.user
-        roles = roles if roles is not None else self.roles(user)
-        return STAFF in roles or issue.reporter_id == user.id
+    def receipt_json(self, issue):
+        """ What a reporter gets back after submitting a report. """
+        return {'id': issue.id, 'ticket': issue.ticket, 'title': issue.title,
+                'instrument_name': issue.instrument_name,
+                'severity': issue.severity, 'status': issue.status}
 
     def issue_json(self, issue, user=None, detail=False):
+        """ Full issue, for managers (the only ones who can open issues). """
         user = user if user is not None else self.app.user
-        roles = self.roles(user)
-        private = self.can_see_private(issue, user, roles)
-        participant = self.is_participant(issue, user, roles)
         d = {
             'id': issue.id, 'ticket': issue.ticket,
             'instrument_id': issue.instrument_id,
@@ -1272,54 +1177,34 @@ class IssuesService:
             'closed_at': iso(issue.closed_at),
             'assignee_id': issue.assignee_id,
             'assignee_name': issue.assignee_name,
+            'reporter_name': issue.reporter_name,
             'symptoms': [{'id': sy.symptom_id, 'label': sy.label}
                          for sy in issue.symptoms],
             'affected_count': len(issue.affected),
+            'imported': issue.imported,
             'version': issue.version,
             'is_mine': issue.reporter_id == user.id,
         }
-        if private:
-            d.update(reporter_name=issue.reporter_name)
         if detail:
-            dup = self.session.get(Issue, issue.duplicate_of_id) if issue.duplicate_of_id else None
+            dup = self.store.get_issue(issue.duplicate_of_id) if issue.duplicate_of_id else None
             d.update(description=issue.description, tried=issue.tried,
                      context=issue.context, resolution=issue.resolution,
                      duplicate_of=dup.ticket if dup else None,
                      duplicate_of_id=dup.id if dup else None,
-                     is_participant=participant,
-                     is_affected=any(a.user_id == user.id for a in issue.affected),
-                     is_staff=STAFF in roles)
-            if private:
-                d.update(reporter_email=issue.reporter_email,
-                         contact=issue.contact,
-                         affected=[a.user_name for a in issue.affected])
-            if STAFF in roles:
-                d['downtimes'] = [{'state': x.state, 'start': iso(x.start),
-                                   'end': iso(x.end)} for x in issue.downtimes]
-            d['attachments'] = [] if not participant else [
-                {'id': a.id, 'filename': a.filename, 'size': a.size,
-                 'content_type': a.content_type, 'internal': a.internal,
-                 'uploaded_by_name': a.uploaded_by_name,
-                 'uploaded_at': iso(a.uploaded_at)}
-                for a in issue.attachments if not a.internal or STAFF in roles]
-            d['events'] = [{'at': iso(e.at), 'kind': e.kind, 'internal': e.internal,
-                            'actor_name': e.actor_name
-                            if private or e.data.get('by_staff') or e.actor_id is None else '',
-                            'data': {k: v for k, v in e.data.items() if k != 'by_staff'}}
-                           for e in issue.events
-                           if not e.internal or STAFF in roles]
+                     reporter_email=issue.reporter_email, contact=issue.contact,
+                     affected=[a.user_name for a in issue.affected],
+                     downtimes=[{'state': x.state, 'start': iso(x.start),
+                                 'end': iso(x.end)} for x in issue.downtimes],
+                     attachments=[{'id': a.id, 'filename': a.filename, 'size': a.size,
+                                   'content_type': a.content_type, 'internal': a.internal,
+                                   'uploaded_by_name': a.uploaded_by_name,
+                                   'uploaded_at': iso(a.uploaded_at)}
+                                  for a in issue.attachments],
+                     events=[{'at': iso(e.at), 'kind': e.kind, 'internal': e.internal,
+                              'actor_name': e.actor_name,
+                              'data': {k: v for k, v in e.data.items() if k != 'by_manager'}}
+                             for e in issue.events])
         return d
-
-
-class _AsUser:
-    """ Present an EMhub user row as an authenticated user for authz. """
-    is_authenticated = True
-
-    def __init__(self, user):
-        self._u = user
-
-    def __getattr__(self, name):
-        return getattr(self._u, name)
 
 
 __all__ = ['IssuesService', 'ValidationError', 'NotFound', 'Forbidden',

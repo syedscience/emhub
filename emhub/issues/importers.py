@@ -39,10 +39,8 @@ The logbooks in EMhub are not changed.
 
 import datetime as dt
 
-from sqlalchemy import select
-
 from .authz import ADMIN, require
-from .models import Issue, IssueEvent, as_utc, utcnow
+from .models import Issue, as_utc, utcnow
 
 LEGACY_SOURCE = 'emhub-logbook'
 STATUS_SEVERITY = {'critical': 'stop', 'high': 'blocked', 'medium': 'degraded',
@@ -64,13 +62,11 @@ def import_logbooks(svc, logbook_ids, instrument_map=None, dry_run=True, user=No
     Returns a report: per logbook counts and skipped entries with reasons. """
     if user is not None:
         require(svc.roles(user), ADMIN)
-    dm, s = svc.app.dm, svc.session
+    dm, store = svc.app.dm, svc.store
     tz = dm.timezone
     instrument_map = instrument_map or {}
-    svc.sync_instruments()
 
-    already = set(s.scalars(select(Issue.legacy_id).where(
-        Issue.legacy_source == LEGACY_SOURCE)))
+    already = {i.legacy_id for i in store.issues(legacy_source=LEGACY_SOURCE)}
     logbooks = {p.id: p for p in dm.get_projects(condition='status="special:logbook"')}
     report = {'dry_run': dry_run, 'logbooks': [], 'imported': 0, 'skipped': 0}
 
@@ -84,7 +80,7 @@ def import_logbooks(svc, logbook_ids, instrument_map=None, dry_run=True, user=No
             continue
 
         resource_id = instrument_map.get(lb_id) or lb.extra.get('resource_id')
-        inst = svc.get_instrument(resource_id=resource_id) if resource_id else None
+        inst = svc.get_instrument(resource_id) if resource_id else None
         for e in sorted(lb.entries, key=lambda e: e.id):
             entry['entries'] += 1
             if str(e.id) in already:
@@ -126,30 +122,28 @@ def import_logbooks(svc, logbook_ids, instrument_map=None, dry_run=True, user=No
                 # No made-up resolution data: how it was fixed is in the notes
                 context=context, imported=True, resolution={},
                 legacy_source=LEGACY_SOURCE, legacy_id=str(e.id))
-            issue.events.append(IssueEvent(
+            store.new_issue(issue, creator)
+            issue.add_event(
                 at=reported, actor_id=creator.id if creator else None,
                 actor_name=creator.name if creator else 'EMhub', kind='imported',
                 internal=True,
                 data={'source': LEGACY_SOURCE, 'logbook_id': lb_id, 'entry_id': e.id,
                       'images': sum(1 for a in actions if a.get('image_file'))
-                      + len(data.get('images') or [])}))
+                      + len(data.get('images') or [])})
             for a, when in zip(actions, action_dates):
                 text = f"[{a.get('status', '')}] {a.get('action', '') or ''}".strip()
-                issue.events.append(IssueEvent(
+                issue.add_event(
                     at=when or reported, actor_name=str(a.get('user', '') or '')[:256],
-                    kind='comment', internal=True, data={'text': text[:5000]}))
-            s.add(issue)
+                    kind='comment', internal=True, data={'text': text[:5000]})
+            # Saved without notifications: imported history never emails anyone
+            store.save_issue(issue, creator, commit=False)
             entry['imported'] += 1
 
         report['imported'] += entry['imported']
         report['skipped'] += len(entry['skipped'])
 
     if dry_run:
-        s.rollback()
+        store.rollback()
     else:
-        s.flush()
-        for issue in s.scalars(select(Issue).where(Issue.legacy_source == LEGACY_SOURCE,
-                                                   Issue.ticket.is_(None))):
-            issue.ticket = f'MI-{as_utc(issue.reported_at).year}-{issue.id:05d}'
-        s.commit()
+        store.commit()
     return report

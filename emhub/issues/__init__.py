@@ -23,47 +23,37 @@
 """
 Microscope Issues module for EMhub.
 
-Lets facility users report instrument problems from EMhub and gives staff a
-workflow (acknowledge, investigate, resolve) plus notifications and insights.
+Lets facility users report instrument problems from EMhub and gives the EMhub
+managers a workflow (acknowledge, investigate, resolve) plus notifications
+and insights. Only managers can see the issues, their history and the
+insights; other users can report and get email updates.
 
 The module is optional and disabled by default. Enable it in the instance
 config.py with:
 
     EMHUB_ISSUES = True
-    ISSUES_DB_URL = 'postgresql+psycopg://user:pass@host/emhub_issues'
 
-If ISSUES_DB_URL is not set, an SQLite file 'emhub-issues.sqlite' in the
-instance folder is used (fine for testing and small facilities).
-Create or upgrade the database schema with:  emh-issues migrate
+Issues are stored in the EMhub database, in a hidden project (status
+'special:issues') created on first use, like EMhub logbooks. No extra
+database or migration is needed. Attachments are saved in the
+'issue_files' folder of the instance (or ISSUES_FILES).
 """
-
-import os
-
-
-def get_db_url(app):
-    """ Return the issues database URL from the config or environment. """
-    url = app.config.get('ISSUES_DB_URL') or os.environ.get('ISSUES_DB_URL')
-    if not url:
-        url = 'sqlite:///' + os.path.join(app.instance_path, 'emhub-issues.sqlite')
-    return url
 
 
 def init_issues(app):
     """ Wire the Microscope Issues module into the EMhub app.
     Called from create_app when EMHUB_ISSUES is enabled.
     """
-    from .db import IssuesDb
+    from .store import IssueStore
     from .service import IssuesService
     from .api import issues_bp, csrf_token
     from .content import register_content
+    from . import guard
 
-    app.issues = IssuesService(app, IssuesDb(get_db_url(app)))
+    store = IssueStore(app.dm)
+    app.issues = IssuesService(app, store)
     app.register_blueprint(issues_bp, url_prefix='/api/mi')
     app.jinja_env.globals['mi_csrf_token'] = csrf_token
     register_content(app.dc)
-
-    @app.teardown_appcontext
-    def shutdown_issues_session(exception=None):
-        app.issues.db.remove()
-
+    guard.install(app, store)
     return app.issues

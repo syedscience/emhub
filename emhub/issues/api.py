@@ -37,9 +37,8 @@ import secrets
 
 import flask
 import flask_login
-from sqlalchemy.orm.exc import StaleDataError
 
-from .authz import Forbidden, ADMIN
+from .authz import Forbidden, ADMIN, MANAGER, require
 from .service import ValidationError, NotFound, Conflict
 
 issues_bp = flask.Blueprint('issues_api', __name__)
@@ -92,9 +91,8 @@ def _invalid(e):
 
 
 @issues_bp.errorhandler(Conflict)
-@issues_bp.errorhandler(StaleDataError)
 def _conflict(e):
-    _service().session.rollback()
+    _service().store.rollback()
     return _error('This issue was changed by someone else. '
                   'Reload it and try again.', 409)
 
@@ -146,7 +144,14 @@ def list_issues():
 def create_issue():
     svc = _service()
     issue = svc.create_issue(_json_body())
-    return flask.jsonify({'issue': svc.issue_json(issue, detail=True)}), 201
+    return flask.jsonify({'issue': _issue_or_receipt(svc, issue)}), 201
+
+
+def _issue_or_receipt(svc, issue):
+    """ Managers get the issue, reporters only the receipt. """
+    if MANAGER in svc.roles():
+        return svc.issue_json(issue, detail=True)
+    return svc.receipt_json(issue)
 
 
 @issues_bp.route('/issues/<int:issue_id>', methods=['GET'])
@@ -196,13 +201,6 @@ def add_comment(issue_id):
     return flask.jsonify({'issue': svc.issue_json(svc.get_issue(issue_id), detail=True)}), 201
 
 
-@issues_bp.route('/issues/<int:issue_id>/join', methods=['POST'])
-def join_issue(issue_id):
-    svc = _service()
-    issue = svc.join_issue(issue_id)
-    return flask.jsonify({'issue': svc.issue_json(issue, detail=True)})
-
-
 @issues_bp.route('/issues/<int:issue_id>/attachments', methods=['POST'])
 def add_attachments(issue_id):
     svc = _service()
@@ -212,12 +210,12 @@ def add_attachments(issue_id):
     internal = flask.request.form.get('internal') in ('1', 'true')
     for f in files:
         svc.add_attachment(issue_id, f.filename, f.stream, internal=internal)
-    return flask.jsonify({'issue': svc.issue_json(svc.get_issue(issue_id), detail=True)}), 201
+    return flask.jsonify({'issue': _issue_or_receipt(svc, svc.store.get_issue(issue_id))}), 201
 
 
-@issues_bp.route('/attachments/<int:attachment_id>', methods=['GET'])
-def get_attachment(attachment_id):
-    att, path = _service().get_attachment(attachment_id)
+@issues_bp.route('/issues/<int:issue_id>/attachments/<attachment_id>', methods=['GET'])
+def get_attachment(issue_id, attachment_id):
+    att, path = _service().get_attachment(issue_id, attachment_id)
     inline = att.content_type.startswith('image/') or att.content_type == 'application/pdf'
     resp = flask.send_file(path, mimetype=att.content_type,
                            as_attachment=not inline, download_name=att.filename)
@@ -227,25 +225,12 @@ def get_attachment(attachment_id):
     return resp
 
 
-@issues_bp.route('/duplicates', methods=['GET'])
-def duplicates():
+@issues_bp.route('/managers', methods=['GET'])
+def managers():
     svc = _service()
-    args = flask.request.args
-    try:
-        instrument_id = int(args.get('instrument_id', ''))
-    except ValueError:
-        raise ValidationError({'instrument_id': 'Must be a number.'})
-    items = svc.duplicates(instrument_id, args.get('problem_area'))
-    return flask.jsonify({'issues': [svc.issue_json(i) for i in items]})
-
-
-@issues_bp.route('/staff', methods=['GET'])
-def staff():
-    svc = _service()
-    from .authz import require, STAFF
-    require(svc.roles(), STAFF)
-    return flask.jsonify({'staff': [{'id': u['id'], 'name': u['name']}
-                                    for u in svc.staff_users()]})
+    require(svc.roles(), MANAGER)
+    return flask.jsonify({'managers': [{'id': u['id'], 'name': u['name']}
+                                       for u in svc.manager_users()]})
 
 
 @issues_bp.route('/notices', methods=['GET'])
@@ -270,7 +255,6 @@ def remove_notice(notice_id):
 @issues_bp.route('/settings', methods=['GET'])
 def get_settings():
     svc = _service()
-    from .authz import require
     require(svc.roles(), ADMIN)
     return flask.jsonify({'notifications': svc.notification_settings(),
                           'webhooks': svc.webhook_names()})

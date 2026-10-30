@@ -23,19 +23,15 @@
 """
 Issue roles, derived from the EMhub user roles.
 
-    reporter: any active EMhub user who can see the Microscope Issues tab
-    staff:    triage and resolve issues, see internal notes
-    manager:  insights, exports
-    admin:    module settings
-
-By default EMhub managers are staff + manager, EMhub admins get every role and
-any 'staff-<unit>' role makes a user staff. Extra EMhub roles can be mapped in
-the 'config:issues' form, e.g.:
-
-    {"roles": {"staff": ["staff-cryoem"], "manager": ["head"], "admin": []}}
+    reporter: any active EMhub user who can see the Microscope Issues tab.
+              Reports issues and gets email updates about them, but cannot
+              browse issues, their history or the insights.
+    manager:  EMhub managers (roles manager, head or admin). Triage and
+              resolve issues, see the full history, insights and exports.
+    admin:    EMhub admins. Module settings.
 """
 
-REPORTER, STAFF, MANAGER, ADMIN = 'reporter', 'staff', 'manager', 'admin'
+REPORTER, MANAGER, ADMIN = 'reporter', 'manager', 'admin'
 
 
 class Forbidden(Exception):
@@ -43,28 +39,17 @@ class Forbidden(Exception):
     pass
 
 
-def user_issue_roles(user, config=None):
+def user_issue_roles(user):
     """ Return the set of issue roles for an EMhub user. """
     if user is None or not getattr(user, 'is_authenticated', False):
         return set()
     if not user.is_active:
         return set()
-
-    mapping = (config or {}).get('roles', {})
-    user_roles = set(user.roles or [])
-
-    def _mapped(role):
-        return bool(user_roles.intersection(mapping.get(role, [])))
-
     roles = {REPORTER}
-
-    if user.is_manager or any(r.startswith('staff-') for r in user_roles) or _mapped(STAFF):
-        roles.add(STAFF)
-    if user.is_manager or _mapped(MANAGER):
+    if user.is_manager:
         roles.add(MANAGER)
-    if user.is_admin or _mapped(ADMIN):
-        roles.update({STAFF, MANAGER, ADMIN})
-
+    if user.is_admin:
+        roles.update({MANAGER, ADMIN})
     return roles
 
 

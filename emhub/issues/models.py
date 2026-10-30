@@ -21,31 +21,22 @@
 # *
 # **************************************************************************
 """
-Database models for the Microscope Issues module.
+Records of the Microscope Issues module.
 
-These tables live in their own database (see ISSUES_DB_URL), separate from
-the EMhub SQLite database. EMhub users and resources are referenced by their
-stable EMhub ids, with a snapshot of names so history survives renames.
-All timestamps are stored in UTC.
+Everything is stored in the EMhub database, as entries of one hidden
+project (status 'special:issues', see store.py): each issue is an entry and
+its history, symptoms, files and downtime are kept inside it. Notices,
+queued notifications and the audit trail are entries of their own type.
+
+These classes are plain Python objects; IssueStore converts them to and
+from the JSON kept in entry.extra['data']. All times are UTC.
 """
 
 import datetime as dt
 
-from sqlalchemy import (Boolean, Column, DateTime, ForeignKey, Integer,
-                        JSON, String, Text, UniqueConstraint, Index)
-from sqlalchemy.orm import declarative_base, relationship
-
-
-Base = declarative_base()
-
 
 def utcnow():
     return dt.datetime.now(dt.timezone.utc)
-
-
-# Timezone-aware datetime column type. SQLite returns naive values,
-# so use as_utc() when reading them back.
-UtcDateTime = DateTime(timezone=True)
 
 
 def as_utc(value):
@@ -54,19 +45,73 @@ def as_utc(value):
     return value
 
 
-class Instrument(Base):
-    """ An EMhub resource that issues can be reported against. """
-    __tablename__ = 'mi_instruments'
+def _dump_time(value):
+    value = as_utc(value)
+    return value.isoformat() if value else None
 
-    id = Column(Integer, primary_key=True)
-    resource_id = Column(Integer, nullable=False, unique=True)  # EMhub resources.id
-    name = Column(String(64), nullable=False)
-    tags = Column(String(256), nullable=False, default='')
-    instrument_type = Column(String(16), nullable=False, default='other')
-    emhub_status = Column(String(32), nullable=False, default='active')
-    # Admins can disable reporting for a resource without touching EMhub
-    enabled = Column(Boolean, nullable=False, default=True)
-    synced_at = Column(UtcDateTime, nullable=False, default=utcnow)
+
+def _load_time(value):
+    if not value:
+        return None
+    if isinstance(value, dt.datetime):
+        return as_utc(value)
+    return as_utc(dt.datetime.fromisoformat(value))
+
+
+class Record:
+    """ Object with a fixed set of fields, saved as a JSON dict.
+    FIELDS maps a field name to its default; TIMES are datetime fields;
+    CHILDREN maps a field to the Record class of its list items. """
+    FIELDS = {}
+    TIMES = ()
+    CHILDREN = {}
+
+    def __init__(self, **kwargs):
+        for name, default in self.FIELDS.items():
+            value = kwargs.pop(name, None)
+            if value is None:
+                value = default() if callable(default) else default
+            setattr(self, name, value)
+        if kwargs:
+            raise TypeError(f'Unknown fields for {type(self).__name__}: {", ".join(kwargs)}')
+
+    def to_dict(self):
+        d = {}
+        for name in self.FIELDS:
+            value = getattr(self, name)
+            if name in self.TIMES:
+                value = _dump_time(value)
+            elif name in self.CHILDREN:
+                value = [c.to_dict() for c in value]
+            d[name] = value
+        return d
+
+    @classmethod
+    def from_dict(cls, d):
+        kwargs = {}
+        for name in cls.FIELDS:
+            if name not in d:
+                continue
+            value = d[name]
+            if name in cls.TIMES:
+                value = _load_time(value)
+            elif name in cls.CHILDREN:
+                value = [cls.CHILDREN[name].from_dict(c) for c in value or []]
+            kwargs[name] = value
+        return cls(**kwargs)
+
+
+class Instrument:
+    """ An EMhub resource that issues can be reported against. Its id is the
+    EMhub resource id; admins can switch reporting off for it. """
+
+    def __init__(self, resource, instrument_type, enabled=True):
+        self.id = self.resource_id = resource.id
+        self.name = resource.name
+        self.tags = resource.tags or ''
+        self.instrument_type = instrument_type
+        self.emhub_status = resource.status or 'active'
+        self.enabled = enabled
 
     @property
     def is_reportable(self):
@@ -78,210 +123,128 @@ class Instrument(Base):
                 'emhub_status': self.emhub_status, 'enabled': self.enabled}
 
 
-class Issue(Base):
-    __tablename__ = 'mi_issues'
+class IssueSymptom(Record):
+    FIELDS = {'symptom_id': '', 'label': ''}
 
+
+class IssueEvent(Record):
+    """ Append-only history of everything that happens to an issue.
+    'internal' events are notes that are never emailed to the reporter. """
+    FIELDS = {'id': 0, 'at': utcnow, 'actor_id': None, 'actor_name': '',
+              'kind': '', 'data': dict, 'internal': False}
+    TIMES = ('at',)
+
+
+class AffectedUser(Record):
+    """ Reporters of duplicates, who follow the original issue. """
+    FIELDS = {'user_id': 0, 'user_name': '', 'user_email': '', 'joined_at': utcnow}
+    TIMES = ('joined_at',)
+
+
+class Attachment(Record):
+    """ File attached to an issue. The file is stored on disk (ISSUES_FILES
+    folder) under its random id; only metadata is kept here. """
+    FIELDS = {'id': '', 'filename': '', 'content_type': '', 'size': 0,
+              'internal': False, 'uploaded_by_id': 0, 'uploaded_by_name': '',
+              'uploaded_at': utcnow}
+    TIMES = ('uploaded_at',)
+
+
+class DowntimeInterval(Record):
+    """ Period when the instrument was degraded or unavailable because of an
+    issue. 'end' is empty while it lasts. Kept separate from the ticket
+    status so restoration time is measured independently of closure. """
+    FIELDS = {'state': '', 'start': None, 'end': None, 'instrument_id': 0}
+    TIMES = ('start', 'end')
+
+
+class Issue(Record):
     STATUSES = ['new', 'acknowledged', 'investigating', 'waiting_vendor',
                 'resolved', 'closed', 'reopened', 'duplicate']
     OPEN_STATUSES = ['new', 'acknowledged', 'investigating',
                      'waiting_vendor', 'reopened']
     INSTRUMENT_STATES = ['operational', 'degraded', 'unavailable', 'unknown']
 
-    id = Column(Integer, primary_key=True)
-    ticket = Column(String(32), unique=True)
-    instrument_id = Column(Integer, ForeignKey('mi_instruments.id'), nullable=False)
-    instrument_name = Column(String(64), nullable=False)  # snapshot at report time
-    problem_area = Column(String(64), nullable=False)
-    title = Column(String(200), nullable=False)
-    description = Column(Text, nullable=False, default='')
-    tried = Column(Text, nullable=False, default='')
-    severity = Column(String(16), nullable=False)
-    status = Column(String(16), nullable=False, default='new')
-    instrument_state = Column(String(16), nullable=False, default='unknown')
+    FIELDS = {
+        'ticket': None,
+        'instrument_id': 0,          # EMhub resource id
+        'instrument_name': '',       # snapshot at report time
+        'problem_area': '', 'title': '', 'description': '', 'tried': '',
+        'severity': '', 'status': 'new', 'instrument_state': 'unknown',
+        'reporter_id': 0, 'reporter_name': '', 'reporter_email': '', 'contact': '',
+        'occurred_at': None,         # when the problem started (reporter)
+        'reported_at': utcnow,       # server time
+        'acknowledged_at': None, 'resolved_at': None, 'closed_at': None,
+        'updated_at': utcnow,
+        'assignee_id': None, 'assignee_name': None,
+        # detector, software, session_type, session_status, onset,
+        # booking_id, session_id
+        'context': dict,
+        # resolution_type, root_cause, resolution_notes, data_lost,
+        # time_lost_min, vendor_ref
+        'resolution': dict,
+        'duplicate_of_id': None,
+        'imported': False, 'legacy_source': None, 'legacy_id': None,
+        'idempotency_key': None,
+        'version': 1,
+        'symptoms': list, 'events': list, 'affected': list,
+        'attachments': list, 'downtimes': list,
+    }
+    TIMES = ('occurred_at', 'reported_at', 'acknowledged_at', 'resolved_at',
+             'closed_at', 'updated_at')
+    CHILDREN = {'symptoms': IssueSymptom, 'events': IssueEvent,
+                'affected': AffectedUser, 'attachments': Attachment,
+                'downtimes': DowntimeInterval}
 
-    reporter_id = Column(Integer, nullable=False)  # EMhub users.id
-    reporter_name = Column(String(256), nullable=False)
-    reporter_email = Column(String(128), nullable=False, default='')
-    contact = Column(String(256), nullable=False, default='')
-
-    occurred_at = Column(UtcDateTime)  # when the problem started (reporter)
-    reported_at = Column(UtcDateTime, nullable=False, default=utcnow)  # server time
-    acknowledged_at = Column(UtcDateTime)
-    resolved_at = Column(UtcDateTime)
-    closed_at = Column(UtcDateTime)
-    updated_at = Column(UtcDateTime, nullable=False, default=utcnow, onupdate=utcnow)
-
-    assignee_id = Column(Integer)
-    assignee_name = Column(String(256))
-
-    # Session context: detector, software, session_type, session_status,
-    # onset, booking_id, session_id
-    context = Column(JSON, nullable=False, default=dict)
-    # Staff closure: resolution_type, root_cause, resolution_notes,
-    # data_lost, time_lost_min, vendor_ref
-    resolution = Column(JSON, nullable=False, default=dict)
-
-    duplicate_of_id = Column(Integer, ForeignKey('mi_issues.id'))
-    imported = Column(Boolean, nullable=False, default=False)
-    legacy_source = Column(String(64))
-    legacy_id = Column(String(64))
-    idempotency_key = Column(String(64), unique=True)
-    version = Column(Integer, nullable=False, default=1)
-
-    instrument = relationship('Instrument')
-    symptoms = relationship('IssueSymptom', cascade='all, delete-orphan',
-                            order_by='IssueSymptom.id')
-    events = relationship('IssueEvent', cascade='all, delete-orphan',
-                          order_by='IssueEvent.id')
-    affected = relationship('AffectedUser', cascade='all, delete-orphan',
-                            order_by='AffectedUser.id')
-    attachments = relationship('Attachment', cascade='all, delete-orphan',
-                               order_by='Attachment.id')
-    downtimes = relationship('DowntimeInterval', cascade='all, delete-orphan',
-                             order_by='DowntimeInterval.id')
-
-    __mapper_args__ = {'version_id_col': version}
-    __table_args__ = (
-        Index('ix_mi_issues_instrument_status', 'instrument_id', 'status'),
-        Index('ix_mi_issues_reported_at', 'reported_at'),
-        Index('ix_mi_issues_reporter', 'reporter_id'),
-        UniqueConstraint('legacy_source', 'legacy_id', name='uq_mi_issues_legacy'),
-    )
+    id = None  # the EMhub entry id, set by the store
 
     @property
     def is_open(self):
         return self.status in self.OPEN_STATUSES
 
-
-class IssueSymptom(Base):
-    __tablename__ = 'mi_issue_symptoms'
-
-    id = Column(Integer, primary_key=True)
-    issue_id = Column(Integer, ForeignKey('mi_issues.id', ondelete='CASCADE'),
-                      nullable=False, index=True)
-    symptom_id = Column(String(64), nullable=False)
-    label = Column(String(256), nullable=False)  # snapshot of the label
-
-    __table_args__ = (UniqueConstraint('issue_id', 'symptom_id'),)
+    def add_event(self, **kwargs):
+        event = IssueEvent(id=max((e.id for e in self.events), default=0) + 1, **kwargs)
+        self.events.append(event)
+        return event
 
 
-class IssueEvent(Base):
-    """ Append-only history of everything that happens to an issue. """
-    __tablename__ = 'mi_issue_events'
-
-    id = Column(Integer, primary_key=True)
-    issue_id = Column(Integer, ForeignKey('mi_issues.id', ondelete='CASCADE'),
-                      nullable=False, index=True)
-    at = Column(UtcDateTime, nullable=False, default=utcnow)
-    actor_id = Column(Integer)
-    actor_name = Column(String(256), nullable=False, default='')
-    kind = Column(String(32), nullable=False)  # created, status, comment, ...
-    data = Column(JSON, nullable=False, default=dict)
-    internal = Column(Boolean, nullable=False, default=False)  # staff-only
-
-
-class OutboxMessage(Base):
-    """ Notification queued in the same transaction as the event that
-    triggered it; delivered by the worker (emh-issues worker). """
-    __tablename__ = 'mi_outbox'
-
+class OutboxMessage(Record):
+    """ Notification queued together with the change that triggered it;
+    delivered by the worker (emh-issues worker). """
     STATUSES = ['queued', 'sending', 'accepted', 'retrying', 'failed', 'skipped']
 
-    id = Column(Integer, primary_key=True)
-    # Empty for test messages sent from the settings page
-    issue_id = Column(Integer, ForeignKey('mi_issues.id', ondelete='CASCADE'),
-                      index=True)
-    event_id = Column(Integer, ForeignKey('mi_issue_events.id', ondelete='CASCADE'))
-    kind = Column(String(32), nullable=False, default='created')  # event kind, 'test', 'summary'
-    payload = Column(JSON)  # extra data, e.g. the period of a weekly summary
-    channel = Column(String(16), nullable=False)  # email | receipt | webhook
-    destination = Column(String(512), nullable=False)
-    dedupe_key = Column(String(128), nullable=False, unique=True)
-    status = Column(String(16), nullable=False, default='queued')
-    attempts = Column(Integer, nullable=False, default=0)
-    next_attempt_at = Column(UtcDateTime, nullable=False, default=utcnow)
-    last_error = Column(Text)
-    created_at = Column(UtcDateTime, nullable=False, default=utcnow)
-    sent_at = Column(UtcDateTime)
+    FIELDS = {
+        'issue_id': None,            # empty for tests and weekly summaries
+        'event_id': None,
+        'kind': 'created',           # event kind, 'test', 'summary'
+        'payload': None,             # extra data, e.g. the summary period
+        'channel': '',               # email | reporter | webhook
+        'destination': '',
+        'dedupe_key': '',
+        'status': 'queued', 'attempts': 0, 'next_attempt_at': utcnow,
+        'last_error': None, 'created_at': utcnow, 'sent_at': None,
+    }
+    TIMES = ('next_attempt_at', 'created_at', 'sent_at')
 
-    __table_args__ = (Index('ix_mi_outbox_status_next', 'status', 'next_attempt_at'),)
+    id = None
 
 
-class AffectedUser(Base):
-    """ Other users hit by the same problem ("I'm also affected"). """
-    __tablename__ = 'mi_affected_users'
-
-    id = Column(Integer, primary_key=True)
-    issue_id = Column(Integer, ForeignKey('mi_issues.id', ondelete='CASCADE'),
-                      nullable=False, index=True)
-    user_id = Column(Integer, nullable=False)
-    user_name = Column(String(256), nullable=False)
-    user_email = Column(String(128), nullable=False, default='')
-    joined_at = Column(UtcDateTime, nullable=False, default=utcnow)
-
-    __table_args__ = (UniqueConstraint('issue_id', 'user_id'),)
-
-
-class Attachment(Base):
-    """ File attached to an issue. The file itself is stored on disk
-    (ISSUES_FILES folder) under a random name; only metadata is here. """
-    __tablename__ = 'mi_attachments'
-
-    id = Column(Integer, primary_key=True)
-    issue_id = Column(Integer, ForeignKey('mi_issues.id', ondelete='CASCADE'),
-                      nullable=False, index=True)
-    filename = Column(String(256), nullable=False)  # sanitized original name
-    stored_name = Column(String(64), nullable=False, unique=True)
-    content_type = Column(String(128), nullable=False)
-    size = Column(Integer, nullable=False)
-    internal = Column(Boolean, nullable=False, default=False)  # staff-only
-    uploaded_by_id = Column(Integer, nullable=False)
-    uploaded_by_name = Column(String(256), nullable=False)
-    uploaded_at = Column(UtcDateTime, nullable=False, default=utcnow)
-
-
-class DowntimeInterval(Base):
-    """ Period when an instrument was degraded or unavailable because of an
-    issue. 'end' is empty while it lasts. Kept separate from the ticket
-    status so restoration time is measured independently of closure. """
-    __tablename__ = 'mi_downtime'
-
-    id = Column(Integer, primary_key=True)
-    issue_id = Column(Integer, ForeignKey('mi_issues.id', ondelete='CASCADE'),
-                      nullable=False, index=True)
-    instrument_id = Column(Integer, ForeignKey('mi_instruments.id'), nullable=False)
-    state = Column(String(16), nullable=False)  # degraded | unavailable
-    start = Column(UtcDateTime, nullable=False)
-    end = Column(UtcDateTime)
-
-    __table_args__ = (Index('ix_mi_downtime_instrument', 'instrument_id', 'start'),)
-
-
-class Notice(Base):
+class Notice(Record):
     """ Service notice shown to users, e.g. 'Krios01 down until Friday'. """
-    __tablename__ = 'mi_notices'
-
     LEVELS = ['info', 'warning', 'danger']
 
-    id = Column(Integer, primary_key=True)
-    instrument_id = Column(Integer, ForeignKey('mi_instruments.id'))  # empty: all
-    message = Column(String(1000), nullable=False)
-    level = Column(String(16), nullable=False, default='warning')
-    active = Column(Boolean, nullable=False, default=True)
-    created_by_name = Column(String(256), nullable=False)
-    created_at = Column(UtcDateTime, nullable=False, default=utcnow)
-    expires_at = Column(UtcDateTime)
+    FIELDS = {'instrument_id': None, 'instrument_name': None, 'message': '',
+              'level': 'warning', 'active': True, 'created_by_name': '',
+              'created_at': utcnow, 'expires_at': None}
+    TIMES = ('created_at', 'expires_at')
 
-    instrument = relationship('Instrument')
+    id = None
 
 
-class AuditEvent(Base):
+class AuditEvent(Record):
     """ Changes to module settings (routing, instruments, notices). """
-    __tablename__ = 'mi_audit'
+    FIELDS = {'at': utcnow, 'actor_id': None, 'actor_name': '', 'action': '',
+              'data': dict}
+    TIMES = ('at',)
 
-    id = Column(Integer, primary_key=True)
-    at = Column(UtcDateTime, nullable=False, default=utcnow)
-    actor_id = Column(Integer)
-    actor_name = Column(String(256), nullable=False, default='')
-    action = Column(String(64), nullable=False)
-    data = Column(JSON, nullable=False, default=dict)
+    id = None

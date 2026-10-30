@@ -23,7 +23,7 @@
 """
 Notification worker: delivers the outbox and escalates overdue issues.
 
-Run it as a service next to EMhub (one process is enough):
+Run it as a service next to EMhub (run a single worker process):
 
     EMHUB_INSTANCE=/path/to/instance emh-issues worker
 
@@ -40,9 +40,7 @@ import random
 import smtplib
 import time
 
-from sqlalchemy import select, or_
-
-from .models import Issue, IssueEvent, OutboxMessage, as_utc, utcnow
+from .models import as_utc, utcnow
 
 logger = logging.getLogger('emhub.issues.worker')
 
@@ -98,7 +96,6 @@ class NotificationWorker:
 
     def build_summary(self, msg):
         """ Weekly summary email, computed when it is sent. """
-        tz = self.app.dm.timezone
         p = msg.payload or {}
         start, end = self.svc.parse_period(p.get('start'), p.get('end'))
         data = self.svc.insights(start, end, check_access=False)
@@ -134,6 +131,46 @@ class NotificationWorker:
         lines += ['', f'Insights: {base}/main?content_id=mi_insights']
         return f"[EMhub] Microscope Issues weekly summary {p.get('week', '')}", '\n'.join(lines)
 
+    def build_reporter_email(self, msg, issue, event):
+        """ Email to the reporter (or reporters of duplicates). Reporters
+        cannot open the issue pages, so the email says it all, without a
+        link, internal notes or other people's details. """
+        data = event.data if event else {}
+        intro = {
+            'created': 'Thank you, your report was saved and the facility staff '
+                       'have been notified.',
+            'acknowledge': 'The facility staff are looking at your report.',
+            'resolve': 'Your report was resolved.',
+            'reopen': 'Your report was reopened.',
+            'duplicate': 'The same problem was already reported. Your report was '
+                         'merged with it and you will get its updates.',
+            'comment': f'{event.actor_name if event else "The staff"} replied:',
+        }.get(msg.kind, f'Update: {msg.kind}')
+        subject = {
+            'created': f'[{issue.ticket}] We received your report: {issue.title}',
+        }.get(msg.kind, f'[{issue.ticket}] {SUBJECTS.get(msg.kind, msg.kind.capitalize())}: '
+                        f'{issue.title}')
+        lines = [intro, '']
+        if msg.kind == 'comment':
+            lines += [data.get('text', ''), '']
+        elif msg.kind == 'resolve':
+            res = data.get('resolution') or {}
+            lines += [f"Resolution:  {res.get('resolution_type', '')}"]
+            if res.get('resolution_notes'):
+                lines += ['', res['resolution_notes']]
+            lines += ['']
+        elif msg.kind == 'reopen':
+            lines += [f"Reason: {data.get('reason', '')}", '']
+        elif msg.kind == 'duplicate':
+            lines += [f"Original report: {data.get('duplicate_of', '')}", '']
+        lines += [f'Ticket:      {issue.ticket}',
+                  f'Instrument:  {issue.instrument_name}',
+                  f'Problem:     {self._area_label(issue)}',
+                  f'Title:       {issue.title}',
+                  f'Status:      {issue.status.replace("_", " ")}',
+                  '', 'If you have more information, please contact the facility staff.']
+        return subject, '\n'.join(lines)
+
     def build_email(self, msg, issue, event):
         if msg.kind == 'summary':
             return self.build_summary(msg)
@@ -141,23 +178,20 @@ class NotificationWorker:
             return ('[EMhub Microscope Issues] Test message',
                     'This is a test message from the EMhub Microscope Issues module.\n'
                     'If you received it, email notifications are working.')
+        if msg.channel == 'reporter':
+            return self.build_reporter_email(msg, issue, event)
         title = SUBJECTS.get(msg.kind, msg.kind.capitalize())
-        if msg.channel == 'receipt':
-            subject = f'[{issue.ticket}] We received your report: {issue.title}'
-            intro = ('Thank you, your report was saved and the facility staff '
-                     'have been notified.')
-        else:
-            subject = (f'[{issue.ticket}] {title} - {self._severity_label(issue)} - '
-                       f'{issue.instrument_name}: {issue.title}')
-            intro = {
-                'created': 'A new issue was reported.',
-                'escalated': 'This issue has not been acknowledged in time.',
-                'acknowledge': 'Facility staff acknowledged this issue.',
-                'resolve': 'This issue was resolved.',
-                'reopen': 'This issue was reopened.',
-                'duplicate': 'This issue was merged into another one.',
-                'comment': 'There is a new comment on this issue.',
-            }.get(msg.kind, f'Update: {msg.kind}')
+        subject = (f'[{issue.ticket}] {title} - {self._severity_label(issue)} - '
+                   f'{issue.instrument_name}: {issue.title}')
+        intro = {
+            'created': 'A new issue was reported.',
+            'escalated': 'This issue has not been acknowledged in time.',
+            'acknowledge': 'Facility staff acknowledged this issue.',
+            'resolve': 'This issue was resolved.',
+            'reopen': 'This issue was reopened.',
+            'duplicate': 'This issue was merged into another one.',
+            'comment': 'There is a new comment on this issue.',
+        }.get(msg.kind, f'Update: {msg.kind}')
 
         lines = [intro, '',
                  f'Ticket:      {issue.ticket}',
@@ -166,7 +200,7 @@ class NotificationWorker:
                  f'Problem:     {self._area_label(issue)}',
                  f'Title:       {issue.title}',
                  f'Status:      {issue.status.replace("_", " ")}']
-        if msg.channel != 'receipt' and msg.kind in ('created', 'escalated'):
+        if msg.kind in ('created', 'escalated'):
             lines.append(f'Reported by: {issue.reporter_name}')
             if issue.contact:
                 lines.append(f'Contact:     {issue.contact}')
@@ -257,30 +291,32 @@ class NotificationWorker:
 
     # ------------------------- Processing ------------------------------------
     def _claim(self, limit=20):
-        """ Take due messages and mark them as 'sending'. On PostgreSQL rows
-        are locked with SKIP LOCKED so several workers never take the same
-        message; messages stuck in 'sending' (crashed worker) are retried. """
-        s = self.svc.session
+        """ Take due messages and mark them as 'sending'. Messages stuck in
+        'sending' (crashed worker) are retried. """
+        store = self.svc.store
         now = utcnow()
-        q = (select(OutboxMessage)
-             .where(or_(OutboxMessage.status.in_(['queued', 'retrying']),
-                        (OutboxMessage.status == 'sending') &
-                        (OutboxMessage.next_attempt_at <= now - SENDING_TIMEOUT)))
-             .where(OutboxMessage.next_attempt_at <= now)
-             .order_by(OutboxMessage.id).limit(limit))
-        if self.svc.db.engine.dialect.name == 'postgresql':
-            q = q.with_for_update(skip_locked=True)
-        msgs = list(s.scalars(q))
-        for m in msgs:
-            m.status, m.next_attempt_at = 'sending', now
-        s.commit()
+        msgs = []
+        for m in store.messages(status=['queued', 'retrying', 'sending']):
+            due = as_utc(m.next_attempt_at)
+            if m.status == 'sending':
+                due += SENDING_TIMEOUT
+            if due <= now:
+                m.status, m.next_attempt_at = 'sending', now
+                store.save_message(m)
+                msgs.append(m)
+            if len(msgs) >= limit:
+                break
+        store.commit()
         return msgs
 
     def deliver(self, msg):
-        s = self.svc.session
-        issue = s.get(Issue, msg.issue_id) if msg.issue_id else None
-        event = s.get(IssueEvent, msg.event_id) if msg.event_id else None
-        if msg.channel in ('email', 'receipt'):
+        issue = self.svc.store.get_issue(msg.issue_id) if msg.issue_id else None
+        event = None
+        if issue is not None and msg.event_id:
+            event = next((e for e in issue.events if e.id == msg.event_id), None)
+        if msg.issue_id and issue is None:
+            raise PermanentError(f'Issue {msg.issue_id} not found')
+        if msg.channel in ('email', 'reporter'):
             subject, body = self.build_email(msg, issue, event)
             self._send_email(msg.destination, subject, body)
         elif msg.channel == 'webhook':
@@ -315,7 +351,8 @@ class NotificationWorker:
                 logger.warning('Notification %s to %s: %s (%s)', msg.id,
                                msg.destination, msg.status, msg.last_error)
             stats[msg.status] = stats.get(msg.status, 0) + 1
-            self.svc.session.commit()
+            self.svc.store.save_message(msg)
+            self.svc.store.commit()
         return stats
 
     def run_once(self):
@@ -325,7 +362,7 @@ class NotificationWorker:
                 self.svc.enqueue_weekly_summary()
                 stats = self.process_outbox()
             finally:
-                self.svc.db.remove()
+                self.app.dm.close()
         if escalated:
             stats['escalated'] = escalated
         return stats

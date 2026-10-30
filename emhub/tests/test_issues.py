@@ -24,13 +24,11 @@
 Tests for the Microscope Issues module (emhub/issues).
 
 Run with:  python -m unittest emhub.tests.test_issues
-
-Tests run on SQLite. They also run on PostgreSQL if ISSUES_TEST_PG_URL is set
-or the 'pgserver' package (embedded PostgreSQL) is installed.
 """
 
 import datetime as dt
 import io
+import json
 import os
 import shutil
 import tempfile
@@ -61,44 +59,15 @@ def tearDownModule():
         shutil.rmtree(_instance, ignore_errors=True)
 
 
-def get_pg_url():
-    if url := os.environ.get('ISSUES_TEST_PG_URL'):
-        return url
-    try:
-        import pgserver
-    except ImportError:
-        return None
-    pgdata = tempfile.mkdtemp(prefix='emhub-issues-pg-')
-    server = pgserver.get_server(pgdata, cleanup_mode='delete')
-    server.psql('CREATE DATABASE emhub_issues_test;')
-    uri = server.get_uri('emhub_issues_test')
-    return uri.replace('postgresql://', 'postgresql+psycopg://', 1)
-
-
-class IssuesTestBase:
-    """ Tests shared by the SQLite and PostgreSQL test cases. """
-    DB_URL = None
+class TestIssues(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        instance = get_test_instance()
-        os.environ['EMHUB_INSTANCE'] = instance
-        url = cls.get_db_url(instance)
-        if url is None:
-            raise unittest.SkipTest('No database available')
-
+        os.environ['EMHUB_INSTANCE'] = get_test_instance()
         from emhub import create_app
-        from emhub.issues.db import IssuesDb
-        db = IssuesDb(url)
-        db.engine.dispose()
-        with db.engine.begin() as conn:  # start from an empty database
-            db.metadata().drop_all(conn)
-            conn.exec_driver_sql('DROP TABLE IF EXISTS mi_alembic_version')
-        db.migrate()
-
         cls.files = tempfile.mkdtemp(prefix='emhub-issues-files-')
         cls.app = create_app({'TESTING': True, 'SECRET_KEY': 'test',
-                              'EMHUB_ISSUES': True, 'ISSUES_DB_URL': url,
+                              'EMHUB_ISSUES': True,
                               'ISSUES_FILES': cls.files,
                               'ISSUES_BASE_URL': 'https://emhub.example.org',
                               'ISSUES_WEBHOOKS': {'teams-cryoem': 'https://example.invalid/hook'}})
@@ -118,10 +87,6 @@ class IssuesTestBase:
     @classmethod
     def tearDownClass(cls):
         shutil.rmtree(getattr(cls, 'files', ''), ignore_errors=True)
-
-    @classmethod
-    def get_db_url(cls, instance):
-        return cls.DB_URL
 
     # ------------------------- helpers ---------------------------------------
     def client_for(self, user=None):
@@ -148,17 +113,53 @@ class IssuesTestBase:
         client = self.client_for(user)
         return self.post(client, '/api/mi/issues', data, user=user)
 
-    # ------------------------- tests -----------------------------------------
-    def test_schema_is_current(self):
-        self.assertTrue(self.svc.db.is_current())
+    def get_issue(self, issue_id):
+        """ The full issue, as a manager sees it. """
+        r = self.client_for(self.manager).get('/api/mi/issues/%d' % issue_id)
+        self.assertEqual(r.status_code, 200, r.get_json())
+        return r.get_json()['issue']
 
-    def test_instruments_synced_from_emhub(self):
+    def new_issue(self, **overrides):
+        """ Report as the reporter, return the full issue. """
+        r = self.report(**overrides)
+        self.assertEqual(r.status_code, 201, r.get_json())
+        return self.get_issue(r.get_json()['issue']['id'])
+
+    def outbox(self, issue_id=None):
+        with self.app.app_context():
+            if issue_id:
+                return self.svc.store.messages(issue_id=issue_id)
+            return self.svc.store.messages()
+
+    def content(self, user, **params):
+        r = self.client_for(user).post('/get_content', data=params)
+        return r.status_code, r.get_data(as_text=True)
+
+    # ------------------------- storage ---------------------------------------
+    def test_stored_in_emhub_project(self):
+        issue = self.new_issue(title='Stored as an entry')
+        dm = self.app.dm
+        with self.app.app_context():
+            project = dm.get_project_by(status='special:issues')
+            self.assertIsNotNone(project)
+            entry = dm.get_entry_by(id=issue['id'])
+            self.assertEqual((entry.project_id, entry.type), (project.id, 'microscope_issue'))
+            self.assertEqual(entry.title, 'Stored as an entry')
+            self.assertEqual(entry.extra['data']['ticket'], issue['ticket'])
+            # Hidden from the normal project lists (they show 'active' projects)
+            self.assertNotEqual(project.status, 'active')
+        self.assertFalse(os.path.exists(os.path.join(self.app.instance_path,
+                                                     'emhub-issues.sqlite')))
+
+    def test_instruments_from_emhub(self):
         with self.app.app_context():
             names = {i.name: i for i in self.svc.instruments(reportable_only=False)}
         self.assertEqual(names['Krios01'].instrument_type, 'tem')
+        self.assertEqual(names['Krios01'].id, names['Krios01'].resource_id)
         self.assertEqual(names['Vitrobot01'].instrument_type, 'prep')
         self.assertFalse(names['Krios02'].is_reportable)  # inactive in EMhub
 
+    # ------------------------- access ----------------------------------------
     def test_requires_login(self):
         client = self.client_for(None)
         self.assertEqual(client.get('/api/mi/meta').status_code, 401)
@@ -180,26 +181,77 @@ class IssuesTestBase:
         krios = next(i for i in data['instruments'] if i['name'] == 'Krios01')
         self.assertIn('beam', krios['problem_areas'])
         self.assertNotIn('fib', krios['problem_areas'])
+        r = self.client_for(self.manager).get('/api/mi/meta')
+        self.assertEqual(r.get_json()['roles'], ['manager', 'reporter'])
 
-    def test_create_issue(self):
-        r = self.report()
+    def test_reporters_only_get_a_receipt(self):
+        r = self.report(contact='Room B-101')
         self.assertEqual(r.status_code, 201, r.get_json())
-        issue = r.get_json()['issue']
-        self.assertRegex(issue['ticket'], r'^MI-\d{4}-\d{5}$')
+        receipt = r.get_json()['issue']
+        self.assertRegex(receipt['ticket'], r'^MI-\d{4}-\d{5}$')
+        self.assertEqual(set(receipt), {'id', 'ticket', 'title', 'instrument_name',
+                                        'severity', 'status'})
+
+        issue = self.get_issue(receipt['id'])
         self.assertEqual(issue['status'], 'new')
         self.assertEqual(issue['reporter_name'], self.reporter.name)
+        self.assertEqual(issue['contact'], 'Room B-101')
         self.assertEqual(issue['symptoms'][0]['id'], 'drift')
         self.assertEqual(issue['context']['software'], 'EPU')
         self.assertEqual([e['kind'] for e in issue['events']], ['created'])
+        self.assertIn(('reporter', self.reporter.email),
+                      [(m.channel, m.destination) for m in self.outbox(issue['id'])])
 
-        from emhub.issues.models import OutboxMessage
-        from sqlalchemy import select
+    def test_only_managers_see_issues(self):
+        issue = self.new_issue()
+        url = '/api/mi/issues/%d' % issue['id']
+        for user in (self.reporter, self.other):
+            client = self.client_for(user)
+            self.assertEqual(client.get(url).status_code, 403)
+            self.assertEqual(client.get('/api/mi/issues').status_code, 403)
+            self.assertEqual(client.get('/api/mi/export.csv').status_code, 403)
+            for params in ({'content_id': 'mi_issues'},
+                           {'content_id': 'mi_issue', 'issue_id': str(issue['id'])},
+                           {'content_id': 'mi_insights'}):
+                status, html = self.content(user, **params)
+                self.assertIn('error-modal-title', html, params)
+                self.assertNotIn(issue['title'], html, params)
+            status, html = self.content(user, content_id='mi_report')
+            self.assertNotIn('error-modal-title', html)
+        for user in (self.manager, self.admin):
+            self.assertEqual(self.client_for(user).get(url).status_code, 200)
+
+    def test_generic_emhub_routes_blocked(self):
+        issue = self.new_issue(title='Secret history')
         with self.app.app_context():
-            msgs = list(self.svc.session.scalars(
-                select(OutboxMessage).where(OutboxMessage.issue_id == issue['id'])))
-            self.assertIn(('receipt', self.reporter.email),
-                          [(m.channel, m.destination) for m in msgs])
+            pid = self.svc.store.project_id()
+        for user in (self.reporter, self.manager):
+            client = self.client_for(user)
+            r = client.post('/api/get_entries', json={})
+            ids = [e['id'] for e in json.loads(r.get_data(as_text=True))]
+            self.assertNotIn(issue['id'], ids)
+            self.assertTrue(ids)  # other entries are still listed
+            r = client.post('/api/get_projects', json={})
+            self.assertNotIn(pid, [p['id'] for p in json.loads(r.get_data(as_text=True))])
+            for url in ('/api/update_entry', '/api/update_entry_extra', '/api/delete_entry'):
+                r = client.post(url, json={'attrs': {'id': issue['id'], 'extra': {}}})
+                self.assertEqual(r.status_code, 403, url)
+            r = client.post('/api/delete_project', json={'attrs': {'id': pid}})
+            self.assertEqual(r.status_code, 403)
+            r = client.post('/api/create_entry', json={'attrs': {
+                'project_id': pid, 'type': 'note', 'title': 'x', 'extra': {'data': {}}}})
+            self.assertEqual(r.status_code, 403)
+            for params in ({'content_id': 'entry_form', 'entry_id': issue['id']},
+                           {'content_id': 'project_details', 'project_id': pid}):
+                r = client.post('/get_content', data=params)
+                self.assertEqual(r.status_code, 403, params)
+                self.assertNotIn('Secret history', r.get_data(as_text=True))
+            r = client.get('/images/entry?entry=%d&file=x.png' % issue['id'])
+            self.assertEqual(r.status_code, 403)
+        with self.app.app_context():
+            self.assertIsNotNone(self.app.dm.get_entry_by(id=issue['id']))
 
+    # ------------------------- reporting -------------------------------------
     def test_idempotent_submit(self):
         r1 = self.report(idempotency_key='same-key-1')
         r2 = self.report(idempotency_key='same-key-1')
@@ -223,37 +275,24 @@ class IssuesTestBase:
         self.assertIn('occurred_at', r.get_json()['errors'])
 
     def test_severity_raised_to_minimum(self):
-        r = self.report(problem_area='vacuum', symptoms=[], severity='question')
-        issue = r.get_json()['issue']
+        issue = self.new_issue(problem_area='vacuum', symptoms=[], severity='question')
         self.assertEqual(issue['severity'], 'stop')
         self.assertEqual(issue['events'][0]['data']['bumped_from'], 'question')
 
-    def test_visibility(self):
-        issue = self.report(contact='Room B-101').get_json()['issue']
-        url = '/api/mi/issues/%d' % issue['id']
-
-        other = self.client_for(self.other).get(url).get_json()['issue']
-        for key in ('reporter_name', 'reporter_email', 'contact'):
-            self.assertNotIn(key, other)
-
-        staff = self.client_for(self.manager).get(url).get_json()['issue']
-        self.assertEqual(staff['contact'], 'Room B-101')
-        self.assertEqual(staff['reporter_email'], self.reporter.email)
-
     def test_list_issues(self):
-        self.report(title='Listed issue')
-        r = self.client_for(self.other).get('/api/mi/issues?status=open')
-        titles = [i['title'] for i in r.get_json()['issues']]
-        self.assertIn('Listed issue', titles)
-        r = self.client_for(self.other).get('/api/mi/issues?mine=1')
-        mine = r.get_json()['issues']
-        self.assertTrue(all(i['is_mine'] for i in mine))
-        self.assertNotIn('Listed issue', [i['title'] for i in mine])
+        self.new_issue(title='Listed issue')
+        r = self.client_for(self.manager).get('/api/mi/issues?status=open')
+        issues = r.get_json()['issues']
+        self.assertIn('Listed issue', [i['title'] for i in issues])
+        self.assertTrue(all(i['status'] in ('new', 'acknowledged', 'investigating',
+                                            'waiting_vendor', 'reopened') for i in issues))
+        r = self.client_for(self.manager).get('/api/mi/issues?mine=1')
+        self.assertTrue(all(i['is_mine'] for i in r.get_json()['issues']))
 
     def test_disable_instrument(self):
         url = '/api/mi/instruments/%d' % self.vitrobot.id
-        r = self.post(self.client_for(self.reporter), url, {'enabled': False}, user=self.reporter)
-        self.assertEqual(r.status_code, 403)
+        r = self.post(self.client_for(self.manager), url, {'enabled': False}, user=self.manager)
+        self.assertEqual(r.status_code, 403)  # admins only
 
         r = self.post(self.client_for(self.admin), url, {'enabled': False}, user=self.admin)
         self.assertEqual(r.status_code, 200)
@@ -262,27 +301,33 @@ class IssuesTestBase:
             self.assertEqual(r.status_code, 422)
         finally:
             self.post(self.client_for(self.admin), url, {'enabled': True}, user=self.admin)
+        r = self.report(instrument_id=self.vitrobot.id, problem_area='other', symptoms=[])
+        self.assertEqual(r.status_code, 201)
 
     def test_pages(self):
-        issue = self.report().get_json()['issue']
-        client = self.client_for(self.reporter)
-
-        main = client.get('/main?content_id=mi_issues').get_data(as_text=True)
+        issue = self.new_issue()
+        main = self.client_for(self.reporter).get('/main?content_id=mi_report').get_data(as_text=True)
         self.assertIn('Microscope Issues</a>', main)  # sidebar tab
+
+        status, html = self.content(self.reporter, content_id='mi_report',
+                                    resource_id=str(self.krios.resource_id),
+                                    submitted=issue['ticket'])
+        self.assertNotIn('error-modal-title', html)
+        self.assertIn('your report <strong>%s</strong> was saved' % issue['ticket'], html)
 
         for params in ({'content_id': 'mi_issues'},
                        {'content_id': 'mi_issues', 'status': 'all', 'mine': '1'},
-                       {'content_id': 'mi_report', 'resource_id': str(self.krios.resource_id)},
+                       {'content_id': 'mi_report'},
                        {'content_id': 'mi_issue', 'issue_id': str(issue['id']), 'created': '1'}):
-            html = client.post('/get_content', data=params).get_data(as_text=True)
+            status, html = self.content(self.manager, **params)
             self.assertNotIn('error-modal-title', html, params)
             self.assertNotIn('Traceback', html, params)
 
-        html = client.post('/get_content', data={'content_id': 'mi_issue',
-                                                 'issue_id': str(issue['id'])}).get_data(as_text=True)
+        status, html = self.content(self.manager, content_id='mi_issue', issue_id=str(issue['id']))
         self.assertIn(issue['ticket'], html)
+        self.assertIn('Manager actions', html)
 
-    # ------------------------- Phase 2: workflow ------------------------------
+    # ------------------------- workflow --------------------------------------
     def act(self, user, issue, action, **extra):
         data = {'action': action, 'version': issue['version']}
         data.update(extra)
@@ -291,7 +336,7 @@ class IssuesTestBase:
         return r, (r.get_json() or {}).get('issue')
 
     def test_workflow(self):
-        issue = self.report().get_json()['issue']
+        issue = self.new_issue()
 
         r, _ = self.act(self.reporter, issue, 'acknowledge')
         self.assertEqual(r.status_code, 403)  # reporters cannot triage
@@ -319,24 +364,40 @@ class IssuesTestBase:
         self.assertEqual(issue3['status'], 'resolved')
         self.assertEqual(issue3['resolution']['time_lost_min'], 45)
 
-        r, _ = self.act(self.other, issue3, 'reopen', reason='Still failing')
-        self.assertEqual(r.status_code, 403)  # not involved in this issue
-        r, _ = self.act(self.reporter, issue3, 'reopen')
+        r, _ = self.act(self.reporter, issue3, 'reopen', reason='Still failing')
+        self.assertEqual(r.status_code, 403)  # managers reopen
+        r, _ = self.act(self.manager, issue3, 'reopen')
         self.assertEqual(r.status_code, 422)  # reason required
-        r, issue4 = self.act(self.reporter, issue3, 'reopen', reason='Fails again after reload')
+        r, issue4 = self.act(self.manager, issue3, 'reopen', reason='Fails again after reload')
         self.assertEqual(issue4['status'], 'reopened')
         self.assertIsNone(issue4['resolved_at'])
         kinds = [e['kind'] for e in issue4['events']]
         self.assertEqual(kinds, ['created', 'acknowledge', 'resolve', 'reopen'])
 
+    def test_concurrent_save_conflict(self):
+        """ A change saved by someone else (or the worker) since the issue was
+        loaded is never overwritten. """
+        from emhub.issues.store import Conflict
+        issue = self.new_issue()
+        with self.app.app_context():
+            store = self.svc.store
+            a, b = store.get_issue(issue['id']), store.get_issue(issue['id'])
+            a.title = 'First save'
+            store.save_issue(a)
+            b.title = 'Second save'
+            with self.assertRaises(Conflict):
+                store.save_issue(b)
+            store.rollback()
+        self.assertEqual(self.get_issue(issue['id'])['title'], 'First save')
+
     def test_update_and_downtime(self):
-        issue = self.report().get_json()['issue']
+        issue = self.new_issue()
         url = '/api/mi/issues/%d/update' % issue['id']
         client = self.client_for(self.manager)
 
         r = self.post(client, url, {'version': issue['version'], 'assignee_id': self.other.id},
                       user=self.manager)
-        self.assertEqual(r.status_code, 422)  # not a staff member
+        self.assertEqual(r.status_code, 422)  # not a manager
 
         r = self.post(client, url, {'version': issue['version'], 'severity': 'blocked',
                                     'instrument_state': 'unavailable',
@@ -351,76 +412,77 @@ class IssuesTestBase:
                             root_cause='Unknown')
         self.assertEqual(issue['instrument_state'], 'operational')
         self.assertIsNotNone(issue['downtimes'][0]['end'])
-        # Reporters do not see downtime bookkeeping
-        mine = self.client_for(self.reporter).get('/api/mi/issues/%d' % issue['id']).get_json()['issue']
-        self.assertNotIn('downtimes', mine)
 
-    def test_comments_and_join(self):
-        issue = self.report().get_json()['issue']
+    def test_comments(self):
+        issue = self.new_issue()
         url = '/api/mi/issues/%d/comments' % issue['id']
 
         r = self.post(self.client_for(self.reporter), url, {'text': 'Still drifting'}, user=self.reporter)
-        self.assertEqual(r.status_code, 201)
-        r = self.post(self.client_for(self.other), url, {'text': 'Me too'}, user=self.other)
         self.assertEqual(r.status_code, 403)
-        r = self.post(self.client_for(self.reporter), url, {'text': 'x', 'internal': True}, user=self.reporter)
-        self.assertEqual(r.status_code, 403)
-
-        r = self.post(self.client_for(self.other), '/api/mi/issues/%d/join' % issue['id'], {}, user=self.other)
-        self.assertEqual(r.status_code, 200)
-        self.assertTrue(r.get_json()['issue']['is_affected'])
-        r = self.post(self.client_for(self.other), url, {'text': 'Me too'}, user=self.other)
-        self.assertEqual(r.status_code, 201)
 
         r = self.post(self.client_for(self.manager), url, {'text': 'Check the vendor log', 'internal': True},
                       user=self.manager)
-        staff_view = r.get_json()['issue']
-        self.assertIn('Check the vendor log', [e['data'].get('text') for e in staff_view['events']])
-        mine = self.client_for(self.reporter).get('/api/mi/issues/%d' % issue['id']).get_json()['issue']
-        self.assertNotIn('Check the vendor log', [e['data'].get('text') for e in mine['events']])
-        self.assertEqual(mine['affected'], [self.other.name])
+        self.assertEqual(r.status_code, 201)
+        r = self.post(self.client_for(self.manager), url, {'text': 'Please reload the grid'},
+                      user=self.manager)
+        events = r.get_json()['issue']['events']
+        self.assertEqual([(e['data'].get('text'), e['internal']) for e in events if e['kind'] == 'comment'],
+                         [('Check the vendor log', True), ('Please reload the grid', False)])
+        # Only the reply is emailed to the reporter
+        comments = [m for m in self.outbox(issue['id']) if m.kind == 'comment']
+        self.assertEqual([(m.channel, m.destination) for m in comments],
+                         [('reporter', self.reporter.email)])
 
     def test_duplicate(self):
-        original = self.report(title='Original').get_json()['issue']
-        dup = self.report(user=self.other, title='Same problem').get_json()['issue']
+        original = self.new_issue(title='Original')
+        dup = self.get_issue(self.report(user=self.other, title='Same problem').get_json()['issue']['id'])
         r, dup2 = self.act(self.manager, dup, 'duplicate', duplicate_of=original['ticket'])
         self.assertEqual(r.status_code, 200, r.get_json())
         self.assertEqual(dup2['status'], 'duplicate')
         self.assertEqual(dup2['duplicate_of'], original['ticket'])
-        orig = self.client_for(self.manager).get('/api/mi/issues/%d' % original['id']).get_json()['issue']
+        orig = self.get_issue(original['id'])
         self.assertIn(self.other.name, orig['affected'])
-        r, _ = self.act(self.manager, original, 'duplicate', duplicate_of=original['ticket'])
+        self.assertIn('duplicate_merged', [e['kind'] for e in orig['events']])
+        r, _ = self.act(self.manager, orig, 'duplicate', duplicate_of=original['ticket'])
         self.assertEqual(r.status_code, 422)  # not a duplicate of itself
 
+        # Both reporters hear when the original is resolved
+        r, _ = self.act(self.manager, orig, 'resolve', resolution_type='Workaround in place',
+                        root_cause='Unknown')
+        dests = [m.destination for m in self.outbox(original['id']) if m.kind == 'resolve']
+        self.assertIn(self.reporter.email, dests)
+        self.assertIn(self.other.email, dests)
+
     def test_attachments(self):
-        issue = self.report().get_json()['issue']
+        issue = self.new_issue()
         url = '/api/mi/issues/%d/attachments' % issue['id']
         png = b'\x89PNG\r\n\x1a\n' + b'0' * 100
 
-        def upload(user, data, name, internal=False):
+        def upload(user, data, name):
             return self.client_for(user).post(
-                url, data={'file': (io.BytesIO(data), name), 'internal': '1' if internal else '0'},
+                url, data={'file': (io.BytesIO(data), name)},
                 headers={'X-MI-CSRF': 'token-%d' % user.id}, content_type='multipart/form-data')
 
-        self.assertEqual(upload(self.reporter, png, '../../shot.png').status_code, 201)
+        r = upload(self.reporter, png, '../../shot.png')
+        self.assertEqual(r.status_code, 201)
+        self.assertNotIn('attachments', r.get_json()['issue'])  # a receipt only
         self.assertEqual(upload(self.reporter, b'not an image', 'fake.png').status_code, 422)
         self.assertEqual(upload(self.reporter, b'MZ\x90\x00', 'tool.exe').status_code, 422)
-        self.assertEqual(upload(self.other, png, 'x.png').status_code, 403)
-        r = upload(self.manager, b'vendor log line\n', 'vendor.log', internal=True)
+        self.assertEqual(upload(self.other, png, 'x.png').status_code, 403)  # not their report
+        r = upload(self.manager, b'vendor log line\n', 'vendor.log')
         self.assertEqual(r.status_code, 201)
 
-        staff_files = r.get_json()['issue']['attachments']
-        self.assertEqual([a['filename'] for a in staff_files], ['shot.png', 'vendor.log'])
-        mine = self.client_for(self.reporter).get('/api/mi/issues/%d' % issue['id']).get_json()['issue']
-        self.assertEqual([a['filename'] for a in mine['attachments']], ['shot.png'])
-
-        shot, log = staff_files
-        r = self.client_for(self.reporter).get('/api/mi/attachments/%d' % shot['id'])
+        files = r.get_json()['issue']['attachments']
+        self.assertEqual([a['filename'] for a in files], ['shot.png', 'vendor.log'])
+        shot = files[0]
+        file_url = '/api/mi/issues/%d/attachments/%s' % (issue['id'], shot['id'])
+        r = self.client_for(self.manager).get(file_url)
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.data, png)
         self.assertEqual(r.headers['X-Content-Type-Options'], 'nosniff')
-        self.assertEqual(self.client_for(self.other).get('/api/mi/attachments/%d' % shot['id']).status_code, 403)
-        self.assertEqual(self.client_for(self.reporter).get('/api/mi/attachments/%d' % log['id']).status_code, 404)
+        self.assertEqual(self.client_for(self.reporter).get(file_url).status_code, 403)
+        self.assertEqual(self.client_for(self.manager).get(
+            '/api/mi/issues/%d/attachments/nope' % issue['id']).status_code, 404)
 
     def test_notices(self):
         data = {'instrument_id': self.krios.id, 'message': 'Krios01 cryo-cycle until Friday'}
@@ -431,34 +493,17 @@ class IssuesTestBase:
         notice = r.get_json()['notice']
         msgs = lambda iid: [n['message'] for n in self.client_for(self.reporter).get(
             '/api/mi/notices?instrument_id=%d' % iid).get_json()['notices']]
-        self.assertIn(data['message'], msgs(self.krios.id))
+        self.assertIn(data['message'], msgs(self.krios.id))  # everyone sees notices
         self.assertNotIn(data['message'], msgs(self.vitrobot.id))
         self.post(self.client_for(self.manager), '/api/mi/notices/%d/remove' % notice['id'], {}, user=self.manager)
         self.assertNotIn(data['message'], msgs(self.krios.id))
 
-    def test_duplicates_lookup(self):
-        issue = self.report(problem_area='detector', symptoms=[], title='Detector not ready').get_json()['issue']
-        r = self.client_for(self.other).get('/api/mi/duplicates?instrument_id=%d&problem_area=detector'
-                                            % self.krios.id)
-        found = r.get_json()['issues']
-        self.assertEqual(found[0]['problem_area'], 'detector')
-        self.assertIn(issue['id'], [i['id'] for i in found])
-
-    # ------------------------- Phase 2: notifications -------------------------
+    # ------------------------- notifications ---------------------------------
     def with_settings(self, settings):
         client = self.client_for(self.admin)
         r = self.post(client, '/api/mi/settings', settings, user=self.admin)
         self.assertEqual(r.status_code, 200, r.get_json())
         self.addCleanup(self.post, client, '/api/mi/settings', {}, self.admin)
-
-    def outbox(self, issue_id=None):
-        from emhub.issues.models import OutboxMessage
-        from sqlalchemy import select
-        with self.app.app_context():
-            q = select(OutboxMessage).order_by(OutboxMessage.id)
-            if issue_id:
-                q = q.where(OutboxMessage.issue_id == issue_id)
-            return list(self.svc.session.scalars(q))
 
     def test_settings_validation(self):
         bad = {'email': ['not-an-email'], 'webhooks': ['unknown-hook'],
@@ -469,13 +514,17 @@ class IssuesTestBase:
         r = self.post(self.client_for(self.manager), '/api/mi/settings', {}, user=self.manager)
         self.assertEqual(r.status_code, 403)  # admins only
 
+    def run_worker(self, worker):
+        while worker.run_once():
+            pass
+
     def test_routing_and_worker(self):
         from emhub.issues.worker import NotificationWorker, RetryLater, PermanentError
         self.with_settings({'email': ['facility@example.org'], 'webhooks': ['teams-cryoem'],
                             'routes': [{'instruments': ['Krios01'], 'min_severity': 'blocked',
                                         'email': ['krios-team@example.org']}]})
-        quiet = self.report(severity='question', title='Routing quiet').get_json()['issue']
-        urgent = self.report(severity='stop', title='Routing urgent').get_json()['issue']
+        quiet = self.new_issue(severity='question', title='Routing quiet')
+        urgent = self.new_issue(severity='stop', title='Routing urgent')
         dests = lambda i: sorted(m.destination for m in self.outbox(i['id']))
         self.assertEqual(dests(quiet), sorted(['facility@example.org', 'teams-cryoem', self.reporter.email]))
         self.assertIn('krios-team@example.org', dests(urgent))
@@ -483,19 +532,23 @@ class IssuesTestBase:
         sent, posted = [], []
         worker = NotificationWorker(self.app, send_email=lambda *a: sent.append(a),
                                     post_webhook=lambda *a: posted.append(a))
-        while worker.run_once():
-            pass
+        self.run_worker(worker)
         self.assertTrue(all(m.status == 'accepted' for m in self.outbox(urgent['id'])))
-        subjects = [s for to, s, body in sent if to == 'krios-team@example.org']
-        self.assertTrue(subjects[0].startswith('[%s] New issue - Stop now - Krios01' % urgent['ticket']))
-        body = [b for to, s, b in sent if to == 'krios-team@example.org'][0]
-        self.assertIn('https://emhub.example.org/main?content_id=mi_issue&issue_id=%d' % urgent['id'], body)
+        to_team = [(s, b) for to, s, b in sent if to == 'krios-team@example.org']
+        self.assertTrue(to_team[0][0].startswith('[%s] New issue - Stop now - Krios01' % urgent['ticket']))
+        self.assertIn('https://emhub.example.org/main?content_id=mi_issue&issue_id=%d' % urgent['id'],
+                      to_team[0][1])
+        # The reporter's receipt has no link: reporters cannot open issues
+        receipt = [(s, b) for to, s, b in sent
+                   if to == self.reporter.email and urgent['ticket'] in s][0]
+        self.assertIn('We received your report', receipt[0])
+        self.assertNotIn('content_id=mi_issue', receipt[1])
         url, card = posted[-1]
         self.assertEqual(url, 'https://example.invalid/hook')
         self.assertEqual(card['attachments'][0]['contentType'], 'application/vnd.microsoft.card.adaptive')
 
         # Failures: transient errors are retried later, permanent ones fail
-        failing = self.report(title='Delivery failure').get_json()['issue']
+        failing = self.new_issue(title='Delivery failure')
 
         def flaky_email(to, subject, body):
             raise RetryLater('SMTP down')
@@ -507,30 +560,35 @@ class IssuesTestBase:
         worker.run_once()
         status = {m.channel: m for m in self.outbox(failing['id'])}
         self.assertEqual(status['email'].status, 'retrying')
-        self.assertGreater(status['email'].next_attempt_at.replace(tzinfo=dt.timezone.utc)
-                           if status['email'].next_attempt_at.tzinfo is None
-                           else status['email'].next_attempt_at,
-                           dt.datetime.now(dt.timezone.utc))
+        self.assertGreater(status['email'].next_attempt_at, dt.datetime.now(dt.timezone.utc))
         self.assertEqual(status['webhook'].status, 'failed')
         # The report itself is untouched by delivery failures
-        self.assertEqual(self.client_for(self.reporter).get('/api/mi/issues/%d' % failing['id']).status_code, 200)
+        self.assertEqual(self.get_issue(failing['id'])['title'], 'Delivery failure')
 
         r = self.post(self.client_for(self.admin), '/api/mi/outbox/%d/retry' % status['webhook'].id, {},
                       user=self.admin)
         self.assertEqual(r.get_json()['status'], 'queued')
 
     def test_progress_emails(self):
-        issue = self.report().get_json()['issue']
+        from emhub.issues.worker import NotificationWorker
+        issue = self.new_issue()
         r, issue = self.act(self.manager, issue, 'acknowledge')
-        msgs = [(m.kind, m.destination) for m in self.outbox(issue['id'])]
-        self.assertIn(('acknowledge', self.reporter.email), msgs)
+        msgs = [(m.kind, m.channel, m.destination) for m in self.outbox(issue['id'])]
+        self.assertIn(('acknowledge', 'reporter', self.reporter.email), msgs)
         # No email to the person who did the action
-        self.assertNotIn(('acknowledge', self.manager.email), msgs)
+        self.assertNotIn(self.manager.email, [m[2] for m in msgs if m[0] == 'acknowledge'])
+        sent = []
+        self.run_worker(NotificationWorker(self.app, send_email=lambda *a: sent.append(a),
+                                           post_webhook=lambda *a: None))
+        body = [b for to, s, b in sent if to == self.reporter.email
+                and s.startswith('[%s] Acknowledged' % issue['ticket'])][0]
+        self.assertIn('The facility staff are looking at your report.', body)
+        self.assertNotIn('content_id=mi_issue', body)
 
     def test_escalation(self):
         self.with_settings({'escalation': {'email': ['oncall@example.org']},
                             'ack_minutes': {'stop': 2}})
-        issue = self.report(severity='stop', title='Escalate me').get_json()['issue']
+        issue = self.new_issue(severity='stop', title='Escalate me')
         with self.app.app_context():
             soon = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=1)
             self.svc.escalate_overdue(now=soon)
@@ -540,54 +598,36 @@ class IssuesTestBase:
         msgs = [(m.kind, m.destination) for m in self.outbox(issue['id'])]
         self.assertEqual(msgs.count(('escalated', 'oncall@example.org')), 1)
 
-        acked = self.report(severity='stop', title='Acknowledged in time').get_json()['issue']
+        acked = self.new_issue(severity='stop', title='Acknowledged in time')
         self.act(self.manager, acked, 'acknowledge')
         with self.app.app_context():
             self.svc.escalate_overdue(now=later)
         self.assertNotIn('escalated', [m.kind for m in self.outbox(acked['id'])])
 
     def test_settings_page(self):
-        r = self.client_for(self.admin).post('/get_content', data={'content_id': 'mi_settings'})
-        html = r.get_data(as_text=True)
+        status, html = self.content(self.admin, content_id='mi_settings')
         self.assertNotIn('error-modal-title', html)
         self.assertIn('teams-cryoem', html)
-        r = self.client_for(self.reporter).post('/get_content', data={'content_id': 'mi_settings'})
-        self.assertIn('error-modal-title', r.get_data(as_text=True))
+        for user in (self.reporter, self.manager):
+            status, html = self.content(user, content_id='mi_settings')
+            self.assertIn('error-modal-title', html)
 
-    def test_issue_page_as_staff(self):
-        issue = self.report().get_json()['issue']
-        html = self.client_for(self.manager).post('/get_content', data={
-            'content_id': 'mi_issue', 'issue_id': str(issue['id'])}).get_data(as_text=True)
-        self.assertNotIn('error-modal-title', html)
-        self.assertIn('Staff actions', html)
-        html = self.client_for(self.reporter).post('/get_content', data={
-            'content_id': 'mi_issue', 'issue_id': str(issue['id'])}).get_data(as_text=True)
-        self.assertNotIn('Staff actions', html)
-
-
-    # ------------------------- Phase 3: insights ------------------------------
+    # ------------------------- insights --------------------------------------
     def test_insights_page_and_access(self):
-        self.report(title='For insights')
-        html = self.client_for(self.manager).post('/get_content', data={
-            'content_id': 'mi_insights'}).get_data(as_text=True)
+        self.new_issue(title='For insights')
+        status, html = self.content(self.manager, content_id='mi_insights')
         self.assertNotIn('error-modal-title', html)
         self.assertIn('Incidents per week', html)
-        html = self.client_for(self.reporter).post('/get_content', data={
-            'content_id': 'mi_insights'}).get_data(as_text=True)
-        self.assertIn('error-modal-title', html)  # managers only
-        bad = self.client_for(self.manager).post('/get_content', data={
-            'content_id': 'mi_insights', 'start': '2026-13-01'}).get_data(as_text=True)
-        self.assertIn('error-modal-title', bad)
+        status, html = self.content(self.manager, content_id='mi_insights', start='2026-13-01')
+        self.assertIn('error-modal-title', html)
 
     def test_csv_export(self):
-        self.report(title='=HYPERLINK("http://evil")', contact='lab')
-        r = self.client_for(self.reporter).get('/api/mi/export.csv')
-        self.assertEqual(r.status_code, 403)
+        self.new_issue(title='=HYPERLINK("http://evil")', contact='lab')
         r = self.client_for(self.manager).get('/api/mi/export.csv')
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.mimetype, 'text/csv')
         import csv as _csv
-        rows = list(_csv.DictReader(io.StringIO(r.get_data(as_text=True).lstrip('\ufeff'))))
+        rows = list(_csv.DictReader(io.StringIO(r.get_data(as_text=True).lstrip('﻿'))))
         evil = [x for x in rows if 'HYPERLINK' in x['title']][0]
         self.assertTrue(evil['title'].startswith("'="))
         self.assertEqual(evil['reporter_email'], self.reporter.email)
@@ -617,9 +657,8 @@ class IssuesTestBase:
         dm = self.app.dm
         with self.app.test_request_context():
             flask_login.login_user(self.admin)
-            lb = dm.create_project(title='Krios01 logbook %s' % self.__class__.__name__,
-                                   status='special:logbook', validate=False,
-                                   extra={'resource_id': self.krios.resource_id})
+            lb = dm.create_project(title='Krios01 logbook', status='special:logbook',
+                                   validate=False, extra={'resource_id': self.krios.resource_id})
             orphan = dm.create_project(title='Computing logbook', status='special:logbook',
                                        validate=False, extra={})
             day = dt.datetime(2026, 5, 4, 14, 0, tzinfo=dt.timezone.utc)
@@ -636,36 +675,30 @@ class IssuesTestBase:
             lb_id, orphan_id = lb.id, orphan.id
 
         with self.app.app_context():
+            before = len(self.svc.store.issues())
+            entries = len(dm.get_entries())
             report = import_logbooks(self.svc, [lb_id, orphan_id], dry_run=True)
-            self.assertEqual(report['imported'], 2)
-            self.assertEqual(report['skipped'], 1)
+            self.assertEqual((report['imported'], report['skipped']), (2, 1))
+            self.assertEqual(len(self.svc.store.issues()), before)  # dry run saves nothing
+            self.assertEqual(len(dm.get_entries()), entries)
             report = import_logbooks(self.svc, [lb_id, orphan_id], dry_run=False)
             self.assertEqual(report['imported'], 2)
             again = import_logbooks(self.svc, [lb_id], dry_run=False)
             self.assertEqual((again['imported'], again['logbooks'][0]['already']), (0, 2))
+            # The logbooks themselves are not changed
+            self.assertEqual(len(dm.get_project_by(id=lb_id).entries), 2)
 
         issues = self.client_for(self.manager).get('/api/mi/issues?status=all').get_json()['issues']
         k3 = [i for i in issues if i['title'] == 'K3 not ready'][0]
         noise = [i for i in issues if i['title'] == 'Stage noise'][0]
         self.assertEqual((k3['status'], k3['severity']), ('closed', 'stop'))
         self.assertEqual((noise['status'], noise['severity']), ('acknowledged', 'degraded'))
-        detail = self.client_for(self.manager).get('/api/mi/issues/%d' % k3['id']).get_json()['issue']
+        self.assertTrue(k3['imported'])
+        detail = self.get_issue(k3['id'])
         self.assertEqual([e['kind'] for e in detail['events']], ['imported', 'comment', 'comment'])
         self.assertTrue(all(e['internal'] for e in detail['events']))
         # Imported history never notifies anyone
         self.assertEqual(self.outbox(k3['id']), [])
-
-
-class TestIssuesSqlite(IssuesTestBase, unittest.TestCase):
-    @classmethod
-    def get_db_url(cls, instance):
-        return 'sqlite:///' + os.path.join(instance, 'emhub-issues.sqlite')
-
-
-class TestIssuesPostgres(IssuesTestBase, unittest.TestCase):
-    @classmethod
-    def get_db_url(cls, instance):
-        return get_pg_url()
 
 
 class TestIssuesDisabled(unittest.TestCase):

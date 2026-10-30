@@ -7,7 +7,6 @@ include requirements.txt
 graft emhub/static
 graft emhub/templates
 graft emhub/issues/knowledge
-graft emhub/issues/migrations
 global-exclude *.pyc
 
 # emflow (the React viewer at the repository root) is not part of the
