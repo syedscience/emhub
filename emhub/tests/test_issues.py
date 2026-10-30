@@ -304,6 +304,36 @@ class TestIssues(unittest.TestCase):
         r = self.report(instrument_id=self.vitrobot.id, problem_area='other', symptoms=[])
         self.assertEqual(r.status_code, 201)
 
+    def test_unsaved_project_is_forgotten(self):
+        """ Reads never create the issues project, and a project created in a
+        transaction that was not saved is not remembered (regression: a
+        page load created it, the request ended without saving, and every
+        later report failed). """
+        from emhub.issues import store as store_mod
+        old_status = store_mod.PROJECT_STATUS
+        store_mod.PROJECT_STATUS = 'special:issues-test'
+        try:
+            with self.app.app_context():
+                dm = self.app.dm
+                st = store_mod.IssueStore(dm)
+                self.assertEqual(st.notices(), [])
+                self.assertIsNone(st.existing_project_id())
+                self.assertIsNone(dm.get_project_by(status='special:issues-test'))
+
+                st.project_id()               # created, then the request ends
+                dm._db_session.remove()
+                self.assertIsNone(st.existing_project_id())
+
+                pid = st.project_id()
+                st.commit()
+                dm._db_session.remove()
+                self.assertEqual(st.existing_project_id(), pid)
+                self.assertIsNotNone(dm.get_project_by(id=pid))
+                dm._db_session.delete(dm.get_project_by(id=pid))
+                dm._db_session.commit()
+        finally:
+            store_mod.PROJECT_STATUS = old_status
+
     def test_ticket_numbers(self):
         """ Tickets count up per year from 0001; a failed report uses no number. """
         first = self.new_issue()

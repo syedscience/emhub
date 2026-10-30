@@ -62,7 +62,8 @@ class Conflict(Exception):
 class IssueStore:
     def __init__(self, dm):
         self.dm = dm
-        self._project_id = None
+        self._project_id = None   # only once the project is saved
+        self._new_project = None  # created in the current transaction
 
     @property
     def session(self):
@@ -70,10 +71,12 @@ class IssueStore:
 
     def commit(self):
         self.session.commit()
+        if self._new_project is not None:
+            self._project_id, self._new_project = self._new_project.id, None
 
     def rollback(self):
         self.session.rollback()
-        self._project_id = None  # the project may have been created in it
+        self._project_id = self._new_project = None
 
     # ------------------------- Project ---------------------------------------
     def _owner_id(self):
@@ -86,28 +89,34 @@ class IssueStore:
         return admin.id
 
     def project_id(self):
-        if self._project_id is None:
-            project = self.dm.get_project_by(status=PROJECT_STATUS)
-            if project is None:
-                now = utcnow()
-                owner = self._owner_id()
-                project = self.dm.Project(
-                    status=PROJECT_STATUS, title=PROJECT_TITLE, date=now,
-                    description='Microscope issues reported in EMhub. Managed by '
-                                'the Microscope Issues module, do not edit.',
-                    user_id=owner, creation_date=now, creation_user_id=owner,
-                    last_update_date=now, last_update_user_id=owner,
-                    extra={'user_can_edit': False})
-                # Saved with the first record, in the same transaction
-                self.session.add(project)
-                self.session.flush()
-            self._project_id = project.id
-        return self._project_id
+        """ The project id, creating the project if needed (only for writes:
+        it is saved with the first record, in the same transaction). """
+        if (pid := self.existing_project_id()) is not None:
+            return pid
+        now = utcnow()
+        owner = self._owner_id()
+        project = self.dm.Project(
+            status=PROJECT_STATUS, title=PROJECT_TITLE, date=now,
+            description='Microscope issues reported in EMhub. Managed by '
+                        'the Microscope Issues module, do not edit.',
+            user_id=owner, creation_date=now, creation_user_id=owner,
+            last_update_date=now, last_update_user_id=owner,
+            extra={'user_can_edit': False})
+        self.session.add(project)
+        self.session.flush()
+        self._new_project = project
+        return project.id
 
     def existing_project_id(self):
-        """ The project id, or None if no issue was stored yet. """
+        """ The project id, or None if no issue was stored yet. A project
+        created in the current transaction counts; one created in a
+        transaction that was not saved (e.g. a failed request) is forgotten. """
         if self._project_id is None:
+            new = self._new_project
+            if new is not None and new in self.session:
+                return new.id
             project = self.dm.get_project_by(status=PROJECT_STATUS)
+            self._new_project = None
             self._project_id = project.id if project else None
         return self._project_id
 
@@ -132,8 +141,10 @@ class IssueStore:
     def _query(self, entry_type, **fields):
         """ Entries of a type, optionally where extra.data.<field> == value. """
         Entry = self.dm.Entry
+        pid = self.existing_project_id()  # reads never create the project
         q = (self.session.query(Entry)
-             .filter(Entry.project_id == self.project_id(), Entry.type == entry_type))
+             .filter(Entry.project_id == (pid if pid is not None else -1),
+                     Entry.type == entry_type))
         for name, value in fields.items():
             column = func.json_extract(Entry.extra, f'$.data.{name}')
             if isinstance(value, (list, tuple, set)):
@@ -184,7 +195,7 @@ class IssueStore:
             entry = self.dm.get_entry_by(id=int(issue_id))
         except (TypeError, ValueError):
             return None
-        if entry is None or entry.type != ISSUE_TYPE or entry.project_id != self.project_id():
+        if entry is None or entry.type != ISSUE_TYPE or entry.project_id != self.existing_project_id():
             return None
         self.session.refresh(entry)
         return self._load(Issue, entry)
@@ -261,7 +272,7 @@ class IssueStore:
 
     def get_message(self, message_id):
         entry = self.dm.get_entry_by(id=int(message_id))
-        if entry is None or entry.type != MESSAGE_TYPE or entry.project_id != self.project_id():
+        if entry is None or entry.type != MESSAGE_TYPE or entry.project_id != self.existing_project_id():
             return None
         return self._load(OutboxMessage, entry)
 
