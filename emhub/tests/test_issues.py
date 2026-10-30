@@ -188,7 +188,7 @@ class TestIssues(unittest.TestCase):
         r = self.report(contact='Room B-101')
         self.assertEqual(r.status_code, 201, r.get_json())
         receipt = r.get_json()['issue']
-        self.assertRegex(receipt['ticket'], r'^MI-\d{4}-\d{5}$')
+        self.assertRegex(receipt['ticket'], r'^MI-\d{4}-\d{4}$')
         self.assertEqual(set(receipt), {'id', 'ticket', 'title', 'instrument_name',
                                         'severity', 'status'})
 
@@ -303,6 +303,20 @@ class TestIssues(unittest.TestCase):
             self.post(self.client_for(self.admin), url, {'enabled': True}, user=self.admin)
         r = self.report(instrument_id=self.vitrobot.id, problem_area='other', symptoms=[])
         self.assertEqual(r.status_code, 201)
+
+    def test_ticket_numbers(self):
+        """ Tickets count up per year from 0001; a failed report uses no number. """
+        first = self.new_issue()
+        year, n = first['ticket'].split('-')[1:]
+        self.assertEqual(len(n), 4)
+        self.assertEqual(self.report(severity='nonsense').status_code, 422)
+        with self.app.app_context():  # numbered, then rolled back
+            from emhub.issues.models import Issue
+            store = self.svc.store
+            store.new_issue(Issue(title='x', reported_at=dt.datetime.now(dt.timezone.utc)))
+            store.rollback()
+        second = self.new_issue()
+        self.assertEqual(second['ticket'], 'MI-%s-%04d' % (year, int(n) + 1))
 
     def test_pages(self):
         issue = self.new_issue()

@@ -195,8 +195,31 @@ class IssueStore:
         entry = self._new_entry(ISSUE_TYPE, issue.title, issue.reported_at, user)
         issue.id, issue._entry = entry.id, entry
         if not issue.ticket:
-            issue.ticket = f'MI-{as_utc(issue.reported_at).year}-{entry.id:05d}'
+            issue.ticket = self._next_ticket(as_utc(issue.reported_at).year)
         return issue
+
+    def _next_ticket(self, year):
+        """ Next ticket of the year: MI-2026-0001, MI-2026-0002...
+        The counters are kept in the project, updated in the same transaction
+        as the new issue, so a rolled back report does not use a number. Two
+        reports at once cannot get the same number: the database lets only
+        one transaction write at a time, the other one fails and is retried
+        by the user. """
+        project = self.session.get(self.dm.Project, self.project_id())
+        self.session.refresh(project)
+        extra = dict(project.extra or {})
+        counters = dict(extra.get('tickets') or {})
+        n = int(counters.get(str(year), 0))
+        while True:  # skip numbers already taken (e.g. counters edited by hand)
+            n += 1
+            ticket = f'MI-{year}-{n:04d}'
+            if not self._query(ISSUE_TYPE, ticket=ticket).first():
+                break
+        counters[str(year)] = n
+        extra['tickets'] = counters
+        project.extra = extra  # a new dict, so SQLAlchemy sees the change
+        self.session.flush()
+        return ticket
 
     def save_issue(self, issue, user=None, messages=(), commit=True):
         """ Save the issue and its queued messages in one transaction.

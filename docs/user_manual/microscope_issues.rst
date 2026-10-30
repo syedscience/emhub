@@ -26,7 +26,7 @@ Reporting an issue
 4. Choose how urgent the problem is. Some problems (for example vacuum or LN2
    alarms) are always treated as urgent, and the form says so when it raises
    the urgency.
-5. Click **Send report**. The report gets a ticket number (``MI-2026-00042``),
+5. Click **Send to staff**. The report gets a ticket number (``MI-2026-0042``),
    shown on the page, and the facility staff are notified. Screenshots, PDF or
    log files (up to 20 MB) can be sent with the report.
 
