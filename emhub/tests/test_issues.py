@@ -1061,7 +1061,8 @@ class TestInsightsDefinitions(unittest.TestCase):
 
     def issue(self, id, inst=1, reported=0, ack=None, resolved=None, occurred=None,
               status='resolved', downtimes=(), imported=False, area='stage',
-              severity='blocked', events=(), resolution=None):
+              severity='blocked', events=(), resolution=None, reporter=0,
+              staff=False, affected=()):
         NS = self.NS
         return NS(id=id, instrument_id=inst, instrument_name='Krios%02d' % inst,
                   reported_at=self.at(reported),
@@ -1070,6 +1071,8 @@ class TestInsightsDefinitions(unittest.TestCase):
                   occurred_at=self.at(occurred) if occurred is not None else None,
                   status=status, imported=imported, problem_area=area, severity=severity,
                   assignee_name=None, symptoms=[], resolution=resolution or {},
+                  reporter_id=reporter, staff_report=staff,
+                  affected=[NS(user_id=u) for u in affected],
                   events=[NS(kind=k, at=self.at(h), data=d) for k, h, d in events],
                   downtimes=[NS(instrument_id=inst, state=st, start=self.at(a),
                                 end=self.at(b) if b is not None else None)
@@ -1079,6 +1082,21 @@ class TestInsightsDefinitions(unittest.TestCase):
         from emhub.issues.insights import compute
         return compute(issues, list(open_issues), {1: 'Krios01', 2: 'Krios02'},
                        self.t0, self.at(24 * 30), self.at(now_h), dt.timezone.utc, **kw)
+
+    def test_incidents_by_lab(self):
+        lab_of = {1: 'Ana Lee', 2: 'Ana Lee', 3: 'Bo Chen', 4: 'Staff PI'}
+        issues = [self.issue(1, reporter=1),
+                  self.issue(2, reporter=2, affected=[1, 3]),   # Lee and Chen hit
+                  self.issue(3, reporter=4, staff=True, affected=[3]),  # staff found it
+                  self.issue(4, reporter=9),                    # user without a PI
+                  self.issue(5, reporter=4, staff=True),        # nobody affected
+                  self.issue(6, reporter=1, status='duplicate')]
+        r = self.compute(issues, lab_of=lab_of)
+        self.assertEqual(dict(r['by_lab']), {'Ana Lee': 2, 'Bo Chen': 2, 'No lab on record': 1})
+        many = {u: 'PI %02d' % u for u in range(1, 21)}
+        r = self.compute([self.issue(u, reporter=u) for u in range(1, 21)], lab_of=many)
+        self.assertEqual(len(r['by_lab']), 15)
+        self.assertEqual(r['by_lab'][-1], ('Other labs', 6))
 
     def test_merge_and_percentiles(self):
         from emhub.issues.insights import merge_intervals, percentile

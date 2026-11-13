@@ -142,6 +142,12 @@
                 <div class="card-body"><div id="mi-chart-areas" class="mi-chart"></div></div></div>
         </div>
         <div class="col-xl-6 col-12">
+            <div class="card"><div class="card-header"><h5 class="mb-0">Incidents by lab</h5>
+                <p class="small text-muted mb-0">Each incident counts for the reporter's lab (PI) and the labs of users
+                    who said "I have this too". Staff reports count for the user they affected.</p></div>
+                <div class="card-body"><div id="mi-chart-labs" class="mi-chart"></div></div></div>
+        </div>
+        <div class="col-xl-6 col-12">
             <div class="card"><div class="card-header"><h5 class="mb-0">Most reported symptoms</h5></div>
                 <div class="card-body"><div id="mi-chart-symptoms" class="mi-chart"></div></div></div>
         </div>
@@ -231,7 +237,7 @@
 
 <script>
 (function () {
-    var DATA = {{ {'trend': data.trend, 'by_area': data.by_area, 'top_symptoms': data.top_symptoms,
+    var DATA = {{ {'trend': data.trend, 'by_area': data.by_area, 'top_symptoms': data.top_symptoms, 'by_lab': data.by_lab,
                    'root_causes': data.root_causes, 'resolution_types': data.resolution_types,
                    'backlog_age': data.backlog.by_age}|tojson }};
     var SEVERITIES = {{ severities|tojson }};
@@ -299,6 +305,7 @@
     });
 
     bars('mi-chart-areas', DATA.by_area, 'incidents');
+    bars('mi-chart-labs', DATA.by_lab, 'incidents');
     bars('mi-chart-symptoms', DATA.top_symptoms, 'reports');
     bars('mi-chart-causes', DATA.root_causes, 'incidents');
     bars('mi-chart-resolutions', DATA.resolution_types, 'incidents');

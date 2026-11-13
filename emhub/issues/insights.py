@@ -112,14 +112,32 @@ def vendor_wait_hours(issue, now):
     return total
 
 
+NO_LAB = 'No lab on record'
+TOP_LABS = 15
+
+
+def issue_labs(issue, lab_of):
+    """ The labs (PI names) hit by an issue: the reporter's lab and the labs
+    of users who said "I have this too". A staff report counts for the user
+    it affected, not for the staff member's own lab. """
+    users = [] if issue.staff_report else [issue.reporter_id]
+    users += [a.user_id for a in issue.affected]
+    labs = {lab_of.get(u) or NO_LAB for u in users if u}
+    if len(labs) > 1:
+        labs.discard(NO_LAB)
+    return labs
+
+
 def compute(issues, open_issues, instruments, start, end, now, tz,
-            booked_hours=None, recurrence_days=30, severities=None, areas=None):
+            booked_hours=None, recurrence_days=30, severities=None, areas=None,
+            lab_of=None):
     """ Compute every insight for issues reported in [start, end).
 
     issues:       issues reported in the period (with events, downtimes, symptoms)
     open_issues:  all currently open issues (backlog is 'now', not the period)
     instruments:  {instrument_id: name} to report on
     booked_hours: {instrument_id: hours booked in EMhub in the period}
+    lab_of:       {user_id: lab (PI) name}
     """
     severities = severities or {}
     areas = areas or {}
@@ -160,7 +178,7 @@ def compute(issues, open_issues, instruments, start, end, now, tz,
     by_inst = defaultdict(list)
     for i in incidents:
         by_inst[i.instrument_id].append(i)
-    for iid, name in sorted(instruments.items(), key=lambda x: x[1]):
+    for iid, name in instruments.items():  # EMhub order
         items = by_inst.get(iid, [])
         down = hours(merge_intervals(downtime.get(iid, [])))
         booked = booked_hours.get(iid)
@@ -194,6 +212,15 @@ def compute(issues, open_issues, instruments, start, end, now, tz,
         while w <= last:
             all_weeks.append(w.isoformat())
             w += dt.timedelta(days=7)
+
+    # ---- Labs: an incident counts once for every lab it hit
+    labs = Counter()
+    for i in incidents:
+        labs.update(issue_labs(i, lab_of or {}))
+    by_lab = labs.most_common()
+    if len(by_lab) > TOP_LABS:
+        rest = sum(n for _, n in by_lab[TOP_LABS - 1:])
+        by_lab = by_lab[:TOP_LABS - 1] + [('Other labs', rest)]
 
     symptoms = Counter()
     for i in incidents:
@@ -266,6 +293,7 @@ def compute(issues, open_issues, instruments, start, end, now, tz,
         'by_area': Counter(areas.get(i.problem_area, i.problem_area) for i in incidents).most_common(),
         'by_severity': Counter(i.severity for i in incidents).most_common(),
         'top_symptoms': symptoms.most_common(10),
+        'by_lab': by_lab,
         'per_instrument': per_instrument,
         'backlog': {'by_age': [(label, backlog_age.get(label, 0)) for label, _ in AGE_BUCKETS],
                     'by_severity': backlog_severity.most_common(),

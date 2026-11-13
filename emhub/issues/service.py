@@ -439,9 +439,8 @@ class IssuesService:
                           enabled=resource.id not in disabled)
 
     def instruments(self, reportable_only=True):
-        """ EMhub resources as instruments, by name. """
-        items = sorted((self._instrument(r) for r in self.app.dm.get_resources()),
-                       key=lambda i: i.name)
+        """ EMhub resources as instruments, in EMhub's own order. """
+        items = [self._instrument(r) for r in self.app.dm.get_resources()]
         if reportable_only:
             items = [i for i in items if i.is_reportable]
         return items
@@ -1526,7 +1525,17 @@ class IssuesService:
             booked_hours=booked,
             recurrence_days=int(self.config().get('recurrence_days', 30)),
             severities=list(self.severities()),
-            areas={a['id']: a['label'] for a in self.problem_areas(include_hidden=True)})
+            areas={a['id']: a['label'] for a in self.problem_areas(include_hidden=True)},
+            lab_of=self._labs())
+
+    def _labs(self):
+        """ {user_id: name of the user's PI}; PIs are their own lab. """
+        labs = {}
+        for u in self.app.dm.get_users():
+            pi = u.get_pi()
+            if pi is not None:
+                labs[u.id] = pi.name
+        return labs
 
     EXPORT_COLUMNS = ['ticket', 'reported_at', 'occurred_at', 'acknowledged_at',
                       'resolved_at', 'closed_at', 'instrument', 'problem_area',
