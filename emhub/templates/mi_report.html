@@ -27,6 +27,15 @@
         <button type="button" class="btn-mi ghost small" id="mi-home-close" aria-label="Hide this tip">&times;</button>
     </p>
 
+    {% if is_manager %}
+        <div class="mode-switch" role="radiogroup" aria-label="Kind of report">
+            <button type="button" class="on" data-mode="user" role="radio" aria-checked="true">
+                <i class="fas fa-user"></i> User report</button>
+            <button type="button" data-mode="staff" role="radio" aria-checked="false">
+                <i class="fas fa-wrench"></i> Staff report <span class="opt">found by staff</span></button>
+        </div>
+    {% endif %}
+
     <div id="mi-notices"></div>
 
     <div class="lock" id="mi-lock" {% if not submitted %}style="display: none"{% endif %}>
@@ -53,7 +62,7 @@
                         <div><dt>Reporting as</dt><dd>{{ reporter.name }}</dd></div>
                         <div><dt>PI</dt><dd>{{ reporter.pi or '—' }}</dd></div>
                         <div><dt>Email</dt><dd>{{ reporter.email or '—' }}</dd></div>
-                        <div class="who-session">
+                        <div class="who-session user-only">
                             <dt><label for="mi-booking">EMhub session</label></dt>
                             <dd><select id="mi-booking"></select></dd>
                         </div>
@@ -69,7 +78,44 @@
                     <div id="mi-inst-tiles"></div>
                     <div class="ferr" data-for="instrument_id"></div>
 
-                    <div id="mi-session" style="display: none">
+                    {% if is_manager %}
+                    <div class="staff-only" id="mi-staff-found" style="display: none">
+                        <div class="frow">
+                            <div>
+                                <label class="f" for="mi-staff-session">Found during</label>
+                                <select id="mi-staff-session"></select>
+                            </div>
+                            <div>
+                                <label class="f" for="mi-staff-started">When did it start?</label>
+                                <input type="datetime-local" id="mi-staff-started">
+                                <div class="ferr" data-for="occurred_at"></div>
+                            </div>
+                        </div>
+                        <label class="check" id="mi-staff-affected-row" style="display: none">
+                            <input type="checkbox" id="mi-staff-affected" checked>
+                            <span>Keep <b id="mi-staff-affected-name"></b> updated by email</span></label>
+                        <div class="subhead">How was it found?</div>
+                        <div class="chips" id="mi-found" role="radiogroup" aria-label="How was it found">
+                            {% for key, label in found_how.items() %}
+                                <label class="chip"><input type="radio" name="found_how" value="{{ key }}"><span>{{ label }}</span></label>
+                            {% endfor %}
+                        </div>
+                        <div class="ferr" data-for="found_how"></div>
+                        <div class="subhead">Instrument now</div>
+                        <div class="states" role="radiogroup" aria-label="Instrument now">
+                            <label class="st st-ok"><input type="radio" name="instrument_state" value="operational">
+                                <span><i class="fas fa-check-circle"></i> Working</span></label>
+                            <label class="st st-deg"><input type="radio" name="instrument_state" value="degraded">
+                                <span><i class="fas fa-exclamation-triangle"></i> Degraded</span></label>
+                            <label class="st st-down"><input type="radio" name="instrument_state" value="unavailable">
+                                <span><i class="fas fa-ban"></i> Down</span></label>
+                        </div>
+                        <p class="meta" style="margin: 8px 0 0">Down or degraded starts counting downtime from when it started.</p>
+                        <div class="ferr" data-for="instrument_state"></div>
+                    </div>
+                    {% endif %}
+
+                    <div id="mi-session" class="user-only" style="display: none">
                         <button type="button" class="more" id="mi-session-toggle" aria-expanded="false"></button>
                         <div class="frow three" id="mi-session-fields" style="display: none">
                             <div data-field="detector">
@@ -118,7 +164,7 @@
 
                     <div class="frow one" style="margin-top: 18px">
                         <div>
-                            <label class="f" for="mi-description">Anything else staff should know? <span class="opt">optional</span></label>
+                            <label class="f" for="mi-description"><span class="user-only">Anything else staff should know?</span><span class="staff-only" style="display: none">Notes for the team</span> <span class="opt">optional</span></label>
                             <textarea id="mi-description" name="description" maxlength="10000" rows="3"
                                       placeholder="For example the exact error message, or what you were doing when it happened."></textarea>
                             <div class="ferr" data-for="description"></div>
@@ -146,7 +192,21 @@
                         Suggested for this problem. Pick another if it is more or less urgent.</p>
                     <p class="bump" id="mi-bump" style="display: none"></p>
                     <div class="ferr" data-for="severity"></div>
-                    <div class="frow one" style="margin: 18px 0 0">
+                    {% if is_manager %}
+                    <div class="staff-only" style="display: none">
+                        <div class="subhead">Who handles it?</div>
+                        <div class="choice-list">
+                            <label class="check"><input type="radio" name="start_as" value="mine" checked>
+                                <span><b>Assign to me</b> and mark it Investigating</span></label>
+                            <label class="check"><input type="radio" name="start_as" value="team">
+                                <span><b>Leave for the team</b> (New, not assigned)</span></label>
+                        </div>
+                        <label class="check notify"><input type="checkbox" id="mi-notify-team">
+                            <span><b>Notify the team</b> by email and Teams, like a user report.
+                                Otherwise it is only added to the issue log.</span></label>
+                    </div>
+                    {% endif %}
+                    <div class="frow one user-only" style="margin: 18px 0 0">
                         <div>
                             <label class="f" for="mi-contact">Where can staff find you? <span class="opt">optional</span></label>
                             <input type="text" id="mi-contact" name="contact" maxlength="256"
@@ -158,7 +218,7 @@
 
                 <div class="actions">
                     <button type="submit" class="btn-mi primary" id="mi-submit" style="padding: 12px 26px; font-size: 15.5px">
-                        <i class="fas fa-paper-plane"></i> Send to staff</button>
+                        <i class="fas fa-paper-plane"></i> <span class="send-label">Send to staff</span></button>
                     <button type="button" class="btn-mi ghost" id="mi-reset">Clear form</button>
                 </div>
                 <p class="errs" id="mi-form-error" role="alert" style="display: none"></p>
@@ -167,10 +227,10 @@
 
         <aside class="side">
             <section class="card-mi" id="mi-progress-card">
-                <h2 style="margin-bottom: 12px">Your report</h2>
+                <h2 style="margin-bottom: 12px"><span class="user-only">Your report</span><span class="staff-only" style="display: none">Staff report</span></h2>
                 <ul class="progress-list" id="mi-progress"></ul>
                 <button type="submit" form="mi-report-form" class="btn-mi primary big" id="mi-submit-side" disabled>
-                    <i class="fas fa-paper-plane"></i> Send to staff</button>
+                    <i class="fas fa-paper-plane"></i> <span class="send-label">Send to staff</span></button>
             </section>
 
             <section class="card-mi" id="mi-next">
@@ -229,6 +289,7 @@
     var sessionOpen = false, openRequest = 0;
     var pending = [];       // files to send with the report
     var PHONE = window.matchMedia && matchMedia('(pointer: coarse)').matches;
+    var staffMode = false, staffSessions = [], staffRequest = 0;
     // One key per form load, so double clicks or retries create one issue
     var idempotencyKey = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
         : String(Date.now()) + Math.random().toString(16).slice(2);
@@ -333,7 +394,7 @@
 
     function fillContext() {
         var inst = selectedInstrument();
-        $('#mi-session').toggle(!!inst);
+        $('#mi-session').toggle(!!inst && !staffMode);
         if (!inst) return;
         $('[data-context]').each(function () {
             var sel = $(this), field = sel.data('context');
@@ -393,6 +454,78 @@
                         $('<p class="mb-0">').text(n.message)))));
             });
         });
+    }
+
+    // ---------------- Staff report (managers) ----------------
+    function localNow() {
+        var d = new Date();
+        d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+        return d.toISOString().slice(0, 16);
+    }
+
+    function setMode(mode) {
+        staffMode = mode === 'staff';
+        $('.mode-switch button').each(function () {
+            var on = $(this).data('mode') === mode;
+            $(this).toggleClass('on', on).attr('aria-checked', String(on));
+        });
+        $('.staff-only').toggle(staffMode);
+        $('.user-only').toggle(!staffMode);
+        $('.send-label').text(staffMode ? 'Log issue' : 'Send to staff');
+        if (staffMode && !$('#mi-staff-started').val()) $('#mi-staff-started').val(localNow());
+        try { localStorage.setItem('mi-report-mode', mode); } catch (e) { /* private mode */ }
+        if (meta) { fillContext(); loadStaffSessions(); refresh(); }
+    }
+
+    // Bookings on the chosen instrument in the last days, anyone's
+    function loadStaffSessions() {
+        var inst = selectedInstrument(), sel = $('#mi-staff-session'), req = ++staffRequest;
+        if (!staffMode || !sel.length) return;
+        sel.empty().append(option('', 'No session: maintenance, alignment or a routine check'));
+        staffSessions = [];
+        staffAffected();
+        if (!inst) return;
+        $.getJSON(MI.api + '/instruments/' + inst.id + '/sessions').done(function (data) {
+            if (req !== staffRequest) return;
+            staffSessions = data.sessions;
+            staffSessions.forEach(function (x, i) {
+                var when = fmtTime(x.start) + (x.end ? ' to ' + fmtTime(x.end) : '');
+                sel.append(option(String(i), [x.user_name || 'Unknown user', when, x.session_name || x.title,
+                                              x.now ? 'on now' : ''].filter(Boolean).join(' · ')));
+            });
+        });
+    }
+
+    function staffSession() {
+        var v = $('#mi-staff-session').val();
+        return v ? staffSessions[parseInt(v)] : null;
+    }
+
+    function staffAffected() {
+        var x = staffSession();
+        $('#mi-staff-affected-row').toggle(!!(x && x.user_id));
+        $('#mi-staff-affected-name').text(x ? x.user_name : '');
+        // Found in a session means found in a user's session
+        if (x && !$('input[name=found_how]:checked').length) $('input[name=found_how][value=session]').prop('checked', true);
+    }
+
+    function staffPayload(payload) {
+        var x = staffSession();
+        payload.staff = true;
+        payload.found_how = $('input[name=found_how]:checked').val() || null;
+        payload.instrument_state = $('input[name=instrument_state]:checked').val() || null;
+        payload.start_as = $('input[name=start_as]:checked').val();
+        payload.notify_team = $('#mi-notify-team').is(':checked');
+        payload.occurred_at = $('#mi-staff-started').val() || null;
+        payload.contact = '';
+        payload.affected_user_id = (x && x.user_id && $('#mi-staff-affected').is(':checked')) ? x.user_id : null;
+        delete payload.context.booking_id;
+        delete payload.context.session_id;
+        if (x) {
+            payload.context.booking_id = x.booking_id;
+            if (x.session_id) payload.context.session_id = x.session_id;
+        }
+        return payload;
     }
 
     // ---------------- Already reported on this instrument ----------------
@@ -468,6 +601,7 @@
         renderNotices();
         renderOpen();
         renderChosen();
+        loadStaffSessions();
     }
 
     function renderSymptoms() {
@@ -607,6 +741,7 @@
     }
 
     function renderPanel() {
+        if (staffMode) { $('#mi-next, #mi-panel').hide(); $('#mi-progress-card').toggle(!sent); return; }
         var area = selectedArea(), sev = effectiveSeverity(), symIds = selectedSymptoms();
         $('#mi-next').toggle(!area && !sent);
         $('#mi-progress-card').toggle(!sent);
@@ -760,6 +895,7 @@
             severity: severity,
             context: context
         };
+        if (staffMode) staffPayload(payload);
         $('#mi-submit, #mi-submit-side').prop('disabled', true);
         $.ajax({
             url: CREATE_URL, type: 'POST', data: JSON.stringify(payload),
@@ -768,14 +904,16 @@
         }).done(function (data) {
             showErrors({}, null);
             var files = pending;
-            if (!files.length) return markSent(data.issue, severity);
+            // A staff report goes straight to its issue page
+            var done = staffMode ? function () { window.location.href = ISSUE_URL + '&issue_id=' + data.issue.id; }
+                                 : function () { markSent(data.issue, severity); };
+            if (!files.length) return done();
             // The report is saved; files are added to it. A failed upload
             // does not lose the report.
             var form = new FormData();
             for (var i = 0; i < files.length; i++) form.append('file', files[i]);
-            MI.post('/issues/' + data.issue.id + '/attachments', form, function () {
-                markSent(data.issue, severity);
-            }, '#mi-form-error').fail(function () {
+            MI.post('/issues/' + data.issue.id + '/attachments', form, done, '#mi-form-error').fail(function () {
+                if (staffMode) return done();
                 markSent(data.issue, severity);
                 $('#mi-lock-text').append(' <span style="color: var(--block)">The files could not be ' +
                     'uploaded; please send them to the facility staff by email.</span>');
@@ -859,6 +997,13 @@
             renderFiles();
         });
         $('#mi-camera-btn').toggle(PHONE);
+        $('.mode-switch').on('click', 'button', function () { setMode($(this).data('mode')); });
+        $('#mi-staff-session').on('change', staffAffected);
+        if (IS_MANAGER) {
+            var mode = 'user';
+            try { mode = localStorage.getItem('mi-report-mode') || 'user'; } catch (e) { /* private mode */ }
+            setMode(mode);
+        }
         homeTip();
         $('#mi-drop').on('dragover', function (e) { e.preventDefault(); $(this).addClass('over'); })
             .on('dragleave', function () { $(this).removeClass('over'); })

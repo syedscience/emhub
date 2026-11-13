@@ -185,6 +185,8 @@ class Issue(Record):
         'resolution': dict,
         'duplicate_of_id': None,
         'imported': False, 'legacy_source': None, 'legacy_id': None,
+        # Reported by a manager (staff report), and how they found it
+        'staff_report': False, 'found_how': '',
         'idempotency_key': None,
         'version': 1,
         'symptoms': list, 'events': list, 'affected': list,

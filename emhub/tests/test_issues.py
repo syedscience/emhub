@@ -859,6 +859,60 @@ class TestIssues(unittest.TestCase):
             self.svc.escalate_overdue(now=later)
         self.assertNotIn('escalated', [m.kind for m in self.outbox(acked['id'])])
 
+    def test_staff_report(self):
+        self.with_settings({'email': ['facility@example.org'],
+                            'escalation': {'email': ['oncall@example.org']},
+                            'ack_minutes': {'blocked': 2}})
+        mc = self.client_for(self.manager)
+        sessions = mc.get('/api/mi/instruments/%d/sessions' % self.krios.id)
+        self.assertEqual(sessions.status_code, 200)
+        self.assertEqual(self.client_for(self.reporter).get(
+            '/api/mi/instruments/%d/sessions' % self.krios.id).status_code, 403)
+
+        started = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=2)).isoformat()
+        staff = {'staff': True, 'found_how': 'maintenance', 'instrument_state': 'unavailable',
+                 'start_as': 'mine', 'notify_team': False, 'occurred_at': started,
+                 'affected_user_id': self.other.id, 'severity': 'blocked', 'title': 'Found on alignment'}
+        r = self.report(user=self.manager, **staff)
+        self.assertEqual(r.status_code, 201, r.get_json())
+        issue = self.get_issue(r.get_json()['issue']['id'])
+        self.assertTrue(issue['staff_report'])
+        self.assertEqual(issue['found_how'], 'During maintenance or alignment')
+        self.assertEqual(issue['status'], 'investigating')
+        self.assertEqual(issue['assignee_name'], self.manager.name)
+        self.assertIsNotNone(issue['acknowledged_at'])
+        self.assertEqual(issue['instrument_state'], 'unavailable')
+        self.assertEqual(issue['downtimes'][0]['start'][:16], started[:16])  # from when it started
+        self.assertEqual(issue['affected'], [self.other.name])
+        self.assertNotIn('pi', issue['context'])
+        # Quiet: nobody is notified, no receipt, never escalated
+        later = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=5)
+        with self.app.app_context():
+            self.svc.escalate_overdue(now=later)
+        self.assertEqual(self.outbox(issue['id']), [])
+
+        # Left for the team, with the team notified
+        r = self.report(user=self.manager, **dict(staff, start_as='team', notify_team=True,
+                                                   affected_user_id=None, instrument_state='degraded'))
+        team = self.get_issue(r.get_json()['issue']['id'])
+        self.assertEqual(team['status'], 'new')
+        self.assertIsNone(team['assignee_name'])
+        dests = [(m.kind, m.channel, m.destination) for m in self.outbox(team['id'])]
+        self.assertIn(('created', 'email', 'facility@example.org'), dests)
+        self.assertNotIn('reporter', [c for _, c, _ in dests])  # no receipt to the staff member
+
+        # Staff fields are required, and ignored for users
+        r = self.report(user=self.manager, staff=True, title='x')
+        self.assertEqual(set(r.get_json()['errors']) >= {'found_how', 'instrument_state'}, True)
+        r = self.report(**staff)  # a user cannot send a staff report
+        user_issue = self.get_issue(r.get_json()['issue']['id'])
+        self.assertFalse(user_issue['staff_report'])
+        self.assertEqual(user_issue['status'], 'new')
+
+        status, html = self.content(self.manager, content_id='mi_issues', staff='1', status='all')
+        self.assertIn(issue['ticket'], html)
+        self.assertNotIn(user_issue['ticket'], html)
+
     def test_facility_name(self):
         url = '/api/mi/settings/facility'
         name = "Cryo-EM/ET Center, St. Jude Children's Research Hospital"

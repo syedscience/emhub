@@ -43,7 +43,7 @@ reporter can add files this way.
 QR codes and phones
 ~~~~~~~~~~~~~~~~~~~
 
-Managers print one QR code per instrument from **Settings -> Print QR codes**.
+Managers print one QR code per instrument from **Setup -> QR codes**.
 Scanning it opens Instrument Help with that instrument chosen
 (``/main?content_id=mi_report&resource_id=<id>``). The codes use
 ``ISSUES_BASE_URL`` from the instance ``config.py``, which must be an address
@@ -53,6 +53,28 @@ phones can open. QR codes need the optional ``segno`` package
 On a phone, Instrument Help can be added to the home screen (Safari: **Share
 -> Add to Home Screen**) and then opens like an app, with its own icon.
 
+
+Staff reports
+-------------
+
+Managers report problems they find themselves with the **Staff report**
+switch at the top of **Report an issue**. Besides the instrument and problem,
+they choose:
+
+* **Found during**: no session (maintenance, alignment, a routine check) or a
+  recent booking on that instrument, of any user. That user can be kept
+  updated by email, like someone who clicked *I have this too*.
+* **When it started**, **how it was found** (routine check, maintenance or
+  alignment, a user's session, vendor visit, alarm) and the **instrument
+  state now**. *Down* or *Degraded* starts the downtime at the start time.
+* **Who handles it**: assigned to themselves and *Investigating*, or left
+  *New* for the team.
+* **Notify the team**: off by default, so a staff report is only added to the
+  issue log (no emails, Teams messages, receipt or escalation). Tick it to
+  alert the team as for a user report.
+
+Staff reports are marked *Found by staff* in the issue log, which can be
+filtered on them.
 
 Following an issue
 ------------------
@@ -92,7 +114,7 @@ Issues move through these states::
 Insights
 --------
 
-Managers open **Instrument Help -> Insights** for a date range (default:
+Managers open **Instrument Help -> Issues & Insights -> Insights** for a date range (default:
 last 90 days), optionally for one instrument:
 
 * incidents per week by urgency, open issues by age, oldest open issues;
@@ -238,7 +260,7 @@ secrets, so they are defined only on the server, never in the database:
     ISSUES_BASE_URL = 'https://emhub.example.org'   # links in emails and cards
     ISSUES_FILES = '/data/emhub-issues/files'       # default: <instance>/issue_files
 
-Admins then choose recipients in **Instrument Help -> Settings**: facility
+Admins then choose recipients in **Instrument Help -> Setup -> Settings**: facility
 emails and webhooks for every new issue, extra recipients by instrument and
 urgency, escalation contacts and acknowledgement times, and a **Queue test**
 button to check delivery.

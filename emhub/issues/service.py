@@ -112,6 +112,17 @@ def sniff_content_type(ext, data):
     return content_type if any(data.startswith(m) for m in magics) else None
 
 
+# How staff found a problem they report themselves
+FOUND_HOW = {
+    'routine': 'Routine check',
+    'maintenance': 'During maintenance or alignment',
+    'session': "During a user's session",
+    'vendor': 'Vendor visit',
+    'alarm': 'Alarm or monitoring',
+    'other': 'Other',
+}
+STAFF_STATES = ('operational', 'degraded', 'unavailable')
+
 LIMITS = {'title': 200, 'description': 10000, 'tried': 5000, 'contact': 256}
 CONTEXT_FIELDS = ['detector', 'software', 'session_type', 'session_status',
                   'onset', 'booking_id', 'session_id']
@@ -622,9 +633,13 @@ class IssuesService:
             context.pop('booking_id', None)
             context.pop('session_id', None)
             context.update(self._session_context(raw_context, user, roles))
-        pi = user.get_pi() if hasattr(user, 'get_pi') else None
-        if pi is not None and pi != user:
-            context['pi'] = pi.name[:128]
+        staff = bool(payload.get('staff')) and MANAGER in roles
+        if staff:
+            staff_fields = self._staff_report_fields(payload, errors)
+        else:
+            pi = user.get_pi() if hasattr(user, 'get_pi') else None
+            if pi is not None and pi != user:
+                context['pi'] = pi.name[:128]
 
         if errors:
             raise ValidationError(errors)
@@ -650,10 +665,76 @@ class IssuesService:
                       context=context, idempotency_key=key,
                       symptoms=[IssueSymptom(symptom_id=sy['id'], label=sy['label'])
                                 for sy in symptoms])
+        created = {'severity': severity, 'bumped_from': bumped_from}
+        if staff:
+            issue.staff_report = True
+            issue.found_how = staff_fields['found_how']
+            created.update(staff=True, notify_team=staff_fields['notify_team'])
+            state = staff_fields['instrument_state']
+            if state == 'operational':
+                issue.instrument_state = state
+            else:  # downtime counts from when the problem started
+                self._set_instrument_state(issue, state, occurred_at or now)
+            if staff_fields['start_as'] == 'mine':
+                issue.status = 'investigating'
+                issue.acknowledged_at = now
+                issue.assignee_id, issue.assignee_name = user.id, user.name
+            if affected := staff_fields['affected']:
+                self._add_affected(issue, affected.id, affected.name, affected.email)
         self.store.new_issue(issue, user)
-        self._add_event(issue, user, 'created',
-                        {'severity': severity, 'bumped_from': bumped_from}, at=now)
+        self._add_event(issue, user, 'created', created, at=now)
         return self._save(issue, user)
+
+    def _staff_report_fields(self, payload, errors):
+        """ The extra fields of a staff report, validated. """
+        found = payload.get('found_how') or ''
+        if found not in FOUND_HOW:
+            errors['found_how'] = 'Choose how the problem was found.'
+        state = payload.get('instrument_state') or ''
+        if state not in STAFF_STATES:
+            errors['instrument_state'] = 'Choose the state of the instrument now.'
+        start_as = payload.get('start_as') or 'mine'
+        if start_as not in ('mine', 'team'):
+            errors['start_as'] = 'Choose who handles it.'
+        affected = None
+        if (uid := payload.get('affected_user_id')) not in (None, ''):
+            try:
+                affected = self.app.dm.get_user_by(id=int(uid))
+            except (TypeError, ValueError):
+                affected = None
+            if affected is None or not affected.is_active:
+                errors['affected_user_id'] = 'Unknown user.'
+        return {'found_how': found, 'instrument_state': state, 'start_as': start_as,
+                'notify_team': bool(payload.get('notify_team')), 'affected': affected}
+
+    def instrument_sessions(self, instrument_id, days=3, user=None):
+        """ Bookings on an instrument from 'days' ago to tomorrow, with
+        their user and session, for staff reports (managers). """
+        user = user if user is not None else self.app.user
+        require(self.roles(user), MANAGER)
+        inst = self.get_instrument(instrument_id)
+        if inst is None:
+            raise NotFound(f'Instrument {instrument_id} not found')
+        now = utcnow()
+        since = (now - dt.timedelta(days=days)).strftime('%Y-%m-%d')
+        until = (now + dt.timedelta(days=1)).strftime('%Y-%m-%d')
+        items = []
+        for b in self.app.dm.get_bookings(condition=f"resource_id={int(inst.id)} AND type='booking' "
+                                                    f"AND end>='{since}' AND start<='{until}'"):
+            if as_utc(b.start) > now:
+                continue  # not started yet
+            owner = b.operator if (b.operator and b.operator_id) else b.owner
+            sessions = sorted(b.session or [], key=lambda s: s.id)
+            items.append({'booking_id': b.id,
+                          'session_id': sessions[-1].id if sessions else None,
+                          'session_name': sessions[-1].name if sessions else '',
+                          'title': b.title or '',
+                          'user_id': owner.id if owner else None,
+                          'user_name': owner.name if owner else '',
+                          'start': iso(b.start), 'end': iso(b.end),
+                          'now': as_utc(b.start) <= now <= as_utc(b.end)})
+        items.sort(key=lambda x: x['start'], reverse=True)
+        return items
 
     def _save(self, issue, user=None, commit=True):
         """ Save the issue with the notifications queued by _add_event. """
@@ -683,7 +764,7 @@ class IssuesService:
         return self.store.find_issue(ticket=ref.upper())
 
     def list_issues(self, user=None, status=None, instrument_id=None,
-                    mine=False, assigned=None, limit=500):
+                    mine=False, assigned=None, staff=False, limit=500):
         """ Return issues, newest first. status can be 'open', 'closed',
         a single status or None for all. assigned can be 'me' or 'none'. """
         user = user if user is not None else self.app.user
@@ -700,6 +781,8 @@ class IssuesService:
             items = [i for i in items if i.instrument_id == int(instrument_id)]
         if mine:
             items = [i for i in items if i.reporter_id == user.id]
+        if staff:
+            items = [i for i in items if i.staff_report]
         if assigned == 'me':
             items = [i for i in items if i.assignee_id == user.id]
         elif assigned == 'none':
@@ -1307,16 +1390,19 @@ class IssuesService:
         actor_email = getattr(actor, 'email', None)
 
         if kind == 'created':
-            targets += [('email', e) for e in notif['email']]
-            targets += [('webhook', w) for w in notif['webhooks']]
-            for route in notif.get('routes') or []:
-                if route.get('instruments') and issue.instrument_name not in route['instruments']:
-                    continue
-                if rank < severities.get(route.get('min_severity'), {}).get('rank', 0):
-                    continue
-                targets += [('email', e) for e in route.get('email', [])]
-                targets += [('webhook', w) for w in route.get('webhooks', [])]
-            if notif.get('receipt_to_reporter', True) and issue.reporter_email:
+            # Staff reports alert the team only when asked, and send no receipt
+            if not issue.staff_report or event.data.get('notify_team'):
+                targets += [('email', e) for e in notif['email']]
+                targets += [('webhook', w) for w in notif['webhooks']]
+                for route in notif.get('routes') or []:
+                    if route.get('instruments') and issue.instrument_name not in route['instruments']:
+                        continue
+                    if rank < severities.get(route.get('min_severity'), {}).get('rank', 0):
+                        continue
+                    targets += [('email', e) for e in route.get('email', [])]
+                    targets += [('webhook', w) for w in route.get('webhooks', [])]
+            if (not issue.staff_report and notif.get('receipt_to_reporter', True)
+                    and issue.reporter_email):
                 targets.append(('reporter', issue.reporter_email))
         elif kind == 'escalated':
             esc = notif.get('escalation') or {}
@@ -1354,7 +1440,9 @@ class IssuesService:
         for issue in self.store.issues(status=['new', 'reopened']):
             start, escalated = None, False
             for e in issue.events:
-                if e.kind in ('created', 'reopen'):
+                if e.kind == 'created' and e.data.get('staff') and not e.data.get('notify_team'):
+                    start, escalated = None, True  # a quiet staff report alerts nobody
+                elif e.kind in ('created', 'reopen'):
                     start, escalated = as_utc(e.at), False
                 elif e.kind == 'escalated':
                     escalated = True
@@ -1553,6 +1641,8 @@ class IssuesService:
                          for sy in issue.symptoms],
             'affected_count': len(issue.affected),
             'imported': issue.imported,
+            'staff_report': issue.staff_report,
+            'found_how': FOUND_HOW.get(issue.found_how, issue.found_how),
             'version': issue.version,
             'is_mine': issue.reporter_id == user.id,
         }

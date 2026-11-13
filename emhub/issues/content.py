@@ -41,6 +41,7 @@ import flask_login
 from . import qr
 from .api import csrf_token
 from .authz import MANAGER, ADMIN, require
+from .service import FOUND_HOW
 
 
 def register_content(dc):
@@ -71,10 +72,11 @@ def register_content(dc):
         status = kwargs.get('status', 'open')
         instrument_id = _int(kwargs.get('instrument_id'))
         mine = kwargs.get('mine') in ('1', 'true')
+        staff = kwargs.get('staff') in ('1', 'true')
         assigned = kwargs.get('assigned')
         issues = svc.list_issues(status=None if status == 'all' else status,
                                  instrument_id=instrument_id, mine=mine,
-                                 assigned=assigned)
+                                 assigned=assigned, staff=staff)
         instruments = svc.instruments(reportable_only=False)
         open_issues = svc.list_issues(status='open')
         me = svc.app.user.id
@@ -93,7 +95,7 @@ def register_content(dc):
             'open_counts': svc.counts(),
             'notices': [svc.notice_json(n) for n in svc.notices()],
             'filters': {'status': status, 'instrument_id': instrument_id,
-                        'mine': mine, 'assigned': assigned},
+                        'mine': mine, 'staff': staff, 'assigned': assigned},
             'severities': svc.severities(),
             'areas': {a['id']: a['label'] for a in svc.problem_areas(include_hidden=True)},
             'csrf_token': csrf_token(),
@@ -139,6 +141,7 @@ def register_content(dc):
         return {
             'selected_instrument_id': selected,
             'my_sessions': sessions,
+            'found_how': FOUND_HOW,
             # Shown read-only: who is reporting comes from the EMhub login
             'reporter': {'name': user.name, 'email': user.email or '',
                          'pi': pi.name if pi and pi != user else '',

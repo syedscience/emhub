@@ -1,10 +1,22 @@
-{# Page tabs for managers; set 'active' to the current content id #}
+{# Page tabs for managers; set 'active' to the current content id.
+   Three tabs; the last two hold sub-tabs. #}
 {% if is_manager %}
+    {% set groups = [
+        ('Report an issue', [('mi_report', 'Report an issue')]),
+        ('Issues & Insights', [('mi_issues', 'Issue log'), ('mi_insights', 'Insights')]),
+        ('Setup', [('mi_catalog', 'Problem areas'), ('mi_settings', 'Settings'), ('mi_qr', 'QR codes')]),
+    ] %}
     <nav class="tabs" aria-label="Views">
-        {% for cid, label in [('mi_report', 'Report an issue'), ('mi_issues', 'Issue log'),
-                              ('mi_insights', 'Insights'), ('mi_catalog', 'Problem areas'),
-                              ('mi_settings', 'Settings')] %}
-            <a class="{{ 'on' if cid == active }}" href="{{ url_for_content(cid) }}">{{ label }}</a>
+        {% for label, pages in groups %}
+            {% set ids = pages|map('first')|list %}
+            <a class="{{ 'on' if active in ids }}" href="{{ url_for_content(ids[0]) }}">{{ label }}</a>
         {% endfor %}
     </nav>
+    {% for label, pages in groups if pages|length > 1 and active in pages|map('first')|list %}
+        <nav class="subtabs" aria-label="{{ label }}">
+            {% for cid, sublabel in pages %}
+                <a class="{{ 'on' if cid == active }}" href="{{ url_for_content(cid) }}">{{ sublabel }}</a>
+            {% endfor %}
+        </nav>
+    {% endfor %}
 {% endif %}

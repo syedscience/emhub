@@ -36,6 +36,10 @@
 .mi .tabs a{display:inline-block;padding:10px 14px;margin-bottom:-1px;border-bottom:2px solid transparent;color:var(--muted);text-decoration:none;font-weight:500;font-size:14.5px}
 .mi .tabs a:hover{color:var(--ink)}
 .mi .tabs a.on{color:var(--primary);border-bottom-color:var(--primary);font-weight:600}
+.mi .subtabs{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap}
+.mi .subtabs a{padding:6px 14px;border-radius:999px;color:var(--ink-2);text-decoration:none;font-size:14px;font-weight:500;background:var(--surface);border:1px solid var(--line)}
+.mi .subtabs a:hover{border-color:var(--line-strong);color:var(--ink)}
+.mi .subtabs a.on{background:var(--primary-soft);border-color:var(--primary);color:var(--primary);font-weight:600}
 .mi .helpline{display:inline-flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:7px 14px;font-size:13.5px;color:var(--ink-2);box-shadow:var(--shadow)}
 .mi .helpline i{color:var(--stop-dot)}
 
@@ -92,6 +96,24 @@
 .mi .photo-buttons{display:flex;flex-direction:column;gap:10px}
 .mi .filelist li.sending{color:var(--muted)}
 .mi .filelist .fa-check-circle{color:var(--ok)}
+.mi .pill.small-pill{font-size:11px;padding:0 7px;line-height:1.5;margin-left:4px}
+.mi .mode-switch{display:inline-flex;gap:4px;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:4px;margin:0 0 16px}
+.mi .mode-switch button{border:0;background:none;font:inherit;font-size:14px;padding:7px 16px;border-radius:999px;color:var(--ink-2);cursor:pointer;display:inline-flex;gap:8px;align-items:center}
+.mi .mode-switch button.on{background:var(--primary);color:#fff;font-weight:600}
+.mi .mode-switch button.on .opt{color:rgba(255,255,255,.8)}
+.mi #mi-staff-found{margin-top:18px;padding-top:16px;border-top:1px dashed var(--line-strong)}
+.mi .states{display:flex;gap:10px;flex-wrap:wrap}
+.mi .states .st{flex:1;min-width:120px;margin:0;cursor:pointer}
+.mi .states .st input{position:absolute;opacity:0}
+.mi .states .st span{display:flex;gap:8px;align-items:center;justify-content:center;padding:10px 12px;border:1px solid var(--line-strong);border-radius:var(--radius-sm);background:var(--surface);font-weight:500}
+.mi .states .st input:focus-visible + span{outline:2px solid var(--primary);outline-offset:2px}
+.mi .states .st-ok input:checked + span{border-color:var(--ok);background:var(--ok-bg);color:var(--ok)}
+.mi .states .st-deg input:checked + span{border-color:var(--degrade);background:var(--degrade-bg);color:var(--degrade)}
+.mi .states .st-down input:checked + span{border-color:var(--stop);background:var(--stop-bg);color:var(--stop)}
+.mi .choice-list{display:flex;flex-direction:column;gap:6px}
+.mi .step label.check{display:flex;gap:10px;align-items:flex-start;font-size:14.5px;color:var(--ink-2);margin:6px 0;cursor:pointer}
+.mi .step label.check input{margin-top:4px}
+.mi .step label.check.notify{margin-top:14px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface-2)}
 .mi .subhead{font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:18px 0 10px}
 
 /* ---------- Form controls ---------- */

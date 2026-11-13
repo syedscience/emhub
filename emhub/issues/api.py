@@ -204,6 +204,12 @@ def open_on_instrument(instrument_id):
     return flask.jsonify({'issues': _service().open_on_instrument(instrument_id)})
 
 
+@issues_bp.route('/instruments/<int:instrument_id>/sessions', methods=['GET'])
+def instrument_sessions(instrument_id):
+    """ Recent bookings on an instrument, for staff reports (managers). """
+    return flask.jsonify({'sessions': _service().instrument_sessions(instrument_id)})
+
+
 @issues_bp.route('/issues/<int:issue_id>/photo_link', methods=['GET'])
 def photo_link(issue_id):
     """ Link and QR code to add photos to one's own report from a phone. """

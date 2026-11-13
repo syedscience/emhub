@@ -78,6 +78,7 @@
                 {% endfor %}
             </select>
             <label class="check"><input type="checkbox" name="mine" value="1" {{ 'checked' if filters.mine }}> Reported by me</label>
+            <label class="check"><input type="checkbox" name="staff" value="1" {{ 'checked' if filters.staff }}> Found by staff</label>
             <div class="search"><i class="fas fa-search"></i>
                 <input type="text" id="mi-search" placeholder="Search tickets, problems, people" aria-label="Search"></div>
         </form>
@@ -106,7 +107,7 @@
                     <td>{{ mi.status_badge(issue.status) }}</td>
                     <td class="when" data-order="{{ issue.reported_at }}">
                         <div class="t-title mi-ago" data-at="{{ issue.reported_at }}" title="{{ issue.reported_at|pretty_datetime }}">{{ issue.reported_at|pretty_datetime }}</div>
-                        <div class="t-sub">{{ issue.reporter_name }}</div></td>
+                        <div class="t-sub">{{ issue.reporter_name }}{% if issue.staff_report %} <span class="pill st-muted small-pill">Staff</span>{% endif %}</div></td>
                     <td>{% if issue.assignee_name %}<span class="avatar">{{ issue.assignee_name.split()|map('first')|join('')|upper|truncate(2, True, '') }}</span>{{ issue.assignee_name }}
                         {% else %}<span class="nobody">Nobody</span>{% endif %}</td>
                 </tr>

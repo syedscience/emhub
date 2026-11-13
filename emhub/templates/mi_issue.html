@@ -50,7 +50,9 @@
                     <div><dt>Instrument</dt><dd>{{ issue.instrument_name }}</dd></div>
                     <div><dt>Problem area</dt><dd>{{ areas.get(issue.problem_area, issue.problem_area) }}</dd></div>
                     <div><dt>Reported</dt><dd>{{ issue.reported_at|pretty_datetime }}<br>
-                        <span class="text-muted">by {{ issue.reporter_name }}</span></dd></div>
+                        <span class="text-muted">by {{ issue.reporter_name }}</span>
+                        {% if issue.staff_report %}<br><span class="pill st-muted">Found by staff</span>{% endif %}</dd></div>
+                    {% if issue.staff_report and issue.found_how %}<div><dt>How it was found</dt><dd>{{ issue.found_how }}</dd></div>{% endif %}
                     {% if issue.occurred_at %}<div><dt>Started</dt><dd>{{ issue.occurred_at|pretty_datetime }}</dd></div>{% endif %}
                     {% if issue.contact %}<div><dt>Where to find them</dt><dd>{{ issue.contact }}</dd></div>{% endif %}
                     {% if issue.acknowledged_at %}<div><dt>First response</dt><dd>{{ issue.acknowledged_at|pretty_datetime }}</dd></div>{% endif %}
