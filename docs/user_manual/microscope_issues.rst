@@ -61,12 +61,12 @@ Managers report problems they find themselves with the **Staff report**
 switch at the top of **Report an issue**. Besides the instrument and problem,
 they choose:
 
-* **Found during**: no session (maintenance, alignment, a routine check) or a
-  recent booking on that instrument, of any user. That user can be kept
-  updated by email, like someone who clicked *I have this too*.
-* **When it started**, **how it was found** (routine check, maintenance or
-  alignment, a user's session, vendor visit, alarm) and the **instrument
-  state now**. *Down* or *Degraded* starts the downtime at the start time.
+* **How it was found**: routine check, maintenance or alignment, a user's
+  session, vendor visit, alarm or monitoring. *During a user's session* asks
+  whose session it was, from the recent bookings on that instrument; that user
+  can be kept updated by email, like someone who clicked *I have this too*.
+* **When it started** and the **instrument state now**. *Down* or *Degraded*
+  starts the downtime at the start time.
 * **Who handles it**: assigned to themselves and *Investigating*, or left
   *New* for the team.
 * **Notify the team**: off by default, so a staff report is only added to the

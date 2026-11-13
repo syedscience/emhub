@@ -82,10 +82,19 @@
 
                     {% if is_manager %}
                     <div class="staff-only" id="mi-staff-found" style="display: none">
-                        <div class="frow">
-                            <div>
-                                <label class="f" for="mi-staff-session">Found during</label>
+                        <div class="subhead" style="margin-top: 0">How was it found?</div>
+                        <div class="chips" id="mi-found" role="radiogroup" aria-label="How was it found">
+                            {% for key, label in found_how.items() %}
+                                <label class="chip"><input type="radio" name="found_how" value="{{ key }}"><span>{{ label }}</span></label>
+                            {% endfor %}
+                        </div>
+                        <div class="ferr" data-for="found_how"></div>
+                        <div class="frow" style="margin-top: 14px">
+                            <div id="mi-staff-session-row" style="display: none">
+                                <label class="f" for="mi-staff-session">Whose session?</label>
                                 <select id="mi-staff-session"></select>
+                                <p class="meta" id="mi-staff-nosession" style="display: none; margin: 6px 0 0">No bookings on this
+                                    instrument in the last 3 days.</p>
                             </div>
                             <div>
                                 <label class="f" for="mi-staff-started">When did it start?</label>
@@ -96,13 +105,6 @@
                         <label class="check" id="mi-staff-affected-row" style="display: none">
                             <input type="checkbox" id="mi-staff-affected" checked>
                             <span>Keep <b id="mi-staff-affected-name"></b> updated by email</span></label>
-                        <div class="subhead">How was it found?</div>
-                        <div class="chips" id="mi-found" role="radiogroup" aria-label="How was it found">
-                            {% for key, label in found_how.items() %}
-                                <label class="chip"><input type="radio" name="found_how" value="{{ key }}"><span>{{ label }}</span></label>
-                            {% endfor %}
-                        </div>
-                        <div class="ferr" data-for="found_how"></div>
                         <div class="subhead">Instrument now</div>
                         <div class="states" role="radiogroup" aria-label="Instrument now">
                             <label class="st st-ok"><input type="radio" name="instrument_state" value="operational">
@@ -483,7 +485,7 @@
     function loadStaffSessions() {
         var inst = selectedInstrument(), sel = $('#mi-staff-session'), req = ++staffRequest;
         if (!staffMode || !sel.length) return;
-        sel.empty().append(option('', 'No session: maintenance, alignment or a routine check'));
+        sel.empty();
         staffSessions = [];
         staffAffected();
         if (!inst) return;
@@ -495,20 +497,29 @@
                 sel.append(option(String(i), [x.user_name || 'Unknown user', when, x.session_name || x.title,
                                               x.now ? 'on now' : ''].filter(Boolean).join(' · ')));
             });
+            // The booking on now is the likely one
+            var now = staffSessions.findIndex(function (x) { return x.now; });
+            sel.append(option('', 'Not listed'));
+            sel.val(staffSessions.length ? String(Math.max(now, 0)) : '');
+            staffAffected();
         });
     }
 
+    // Only "During a user's session" asks whose session it was
+    function inSession() { return $('input[name=found_how]:checked').val() === 'session'; }
+
     function staffSession() {
         var v = $('#mi-staff-session').val();
-        return v ? staffSessions[parseInt(v)] : null;
+        return inSession() && v ? staffSessions[parseInt(v)] : null;
     }
 
     function staffAffected() {
         var x = staffSession();
+        $('#mi-staff-session-row').toggle(inSession());
+        $('#mi-staff-session').toggle(staffSessions.length > 0);
+        $('#mi-staff-nosession').toggle(!staffSessions.length);
         $('#mi-staff-affected-row').toggle(!!(x && x.user_id));
         $('#mi-staff-affected-name').text(x ? x.user_name : '');
-        // Found in a session means found in a user's session
-        if (x && !$('input[name=found_how]:checked').length) $('input[name=found_how][value=session]').prop('checked', true);
     }
 
     function staffPayload(payload) {
@@ -1006,6 +1017,7 @@
         $('#mi-camera-btn').toggle(PHONE);
         $('.mode-switch').on('click', 'button', function () { setMode($(this).data('mode')); });
         $('#mi-staff-session').on('change', staffAffected);
+        $('#mi-found').on('change', 'input', staffAffected);
         if (IS_MANAGER) {
             var mode = 'user';
             try { mode = localStorage.getItem('mi-report-mode') || 'user'; } catch (e) { /* private mode */ }
