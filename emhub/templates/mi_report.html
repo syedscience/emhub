@@ -9,8 +9,10 @@
             <div>
                 <p class="fac">{{ facility_name }}</p>
                 <h1>Report an instrument problem</h1>
-                <p class="sub">Three quick clicks. Staff are notified as soon as you send it, and safe checks
+                <p class="sub user-only">Three quick clicks. Staff are notified as soon as you send it, and safe checks
                     for your problem appear on the right while you wait.</p>
+                <p class="sub staff-only" style="display: none">Log a problem you found. It goes to the issue log; the
+                    team is only alerted if you tick <b>Notify the team</b>.</p>
             </div>
             {% if staff_phone %}
                 <span class="helpline"><i class="fas fa-phone"></i> Urgent? Call staff on <b>{{ staff_phone }}</b></span>
@@ -60,7 +62,7 @@
                     <span class="avatar">{{ reporter.initials }}</span>
                     <dl class="who-facts">
                         <div><dt>Reporting as</dt><dd>{{ reporter.name }}</dd></div>
-                        <div><dt>PI</dt><dd>{{ reporter.pi or '—' }}</dd></div>
+                        <div class="user-only"><dt>PI</dt><dd>{{ reporter.pi or '—' }}</dd></div>
                         <div><dt>Email</dt><dd>{{ reporter.email or '—' }}</dd></div>
                         <div class="who-session user-only">
                             <dt><label for="mi-booking">EMhub session</label></dt>
@@ -872,8 +874,13 @@
     function submit(e) {
         e.preventDefault();
         var context = {};
+        // Session details the user filled in; fields hidden for this
+        // instrument ('Not applicable') and staff reports send none
         $('[data-context]').each(function () {
-            if ($(this).val()) context[$(this).data('context')] = $(this).val();
+            var field = $(this).data('context');
+            if (!staffMode && $(this).val() && $('[data-field=' + field + ']').css('display') !== 'none') {
+                context[field] = $(this).val();
+            }
         });
         var session = selectedSession();
         if (session) {

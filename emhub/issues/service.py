@@ -565,6 +565,9 @@ class IssuesService:
         manager = MANAGER in roles
         if booking is not None and (manager or self._involves(booking, user)):
             out['booking_id'] = str(booking.id)
+            owner = booking.operator if (booking.operator and booking.operator_id) else booking.owner
+            if owner is not None:
+                out['booked_by'] = owner.name[:128]
         if session is not None and (manager or session.operator_id == user.id or
                                     (booking is not None and session.booking_id == booking.id
                                      and 'booking_id' in out)):
