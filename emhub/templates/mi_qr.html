@@ -33,7 +33,8 @@
         {% for l in labels %}
             <div class="qr-label">
                 <div class="qr-top"><i class="fas fa-life-ring"></i> Instrument Help</div>
-                <div class="qr-name">{{ l.name }}</div>
+                {% set parts = l.name.rsplit(' (', 1) if l.name.endswith(')') else [l.name] %}
+                <div class="qr-name">{{ parts[0] }}{% if parts|length > 1 %} <span class="paren">({{ parts[1] }}</span>{% endif %}</div>
                 <div class="qr-code">{{ l.svg|safe }}</div>
                 <div class="qr-hint">Problem with this instrument?<br>Scan with your phone camera.</div>
                 <div class="qr-url no-print">{{ l.url }}</div>

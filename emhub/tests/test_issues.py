@@ -157,6 +157,9 @@ class TestIssues(unittest.TestCase):
         self.assertEqual(names['Krios01'].instrument_type, 'tem')
         self.assertEqual(names['Krios01'].id, names['Krios01'].resource_id)
         self.assertEqual(names['Vitrobot01'].instrument_type, 'plunge')
+        from emhub.issues.service import instrument_type_for
+        self.assertEqual(instrument_type_for('instrument uv cleaner prep', 'UV Cleaner'), 'uv')
+        self.assertEqual(instrument_type_for('instrument leica plunge prep', 'Leica GP2 (ARC)'), 'plunge')
         self.assertFalse(names['Krios02'].is_reportable)  # inactive in EMhub
 
     # ------------------------- access ----------------------------------------

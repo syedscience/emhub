@@ -6,6 +6,7 @@
   "fib": "Cryo-FIB / FIB-SEM",
   "plunge": "Plunge freezer",
   "coater": "Coater or glow discharger",
+  "uv": "UV / ozone cleaner",
   "hpf": "High-pressure freezer",
   "pattern": "Micropatterning",
   "light": "Light microscope",
@@ -1118,6 +1119,61 @@
    ]
   },
   {
+   "id": "uv_clean",
+   "label": "UV lamp, timer or ozone",
+   "suggestSeverity": "blocked",
+   "general": [
+    "Note the cleaning time you set and how long the lamp was on.",
+    "Let the unit cool for a few minutes before opening it after a run."
+   ],
+   "avoid": [
+    "Do not look at the lamp while it is on, and do not defeat the door interlock.",
+    "Do not open the unit straight after a run: let the ozone clear first."
+   ],
+   "symptoms": [
+    {
+     "id": "nolamp",
+     "label": "Lamp does not switch on",
+     "steps": [
+      "Check the door is fully closed; most cleaners will not start with it open.",
+      "Check the timer is set and the unit is switched on at the wall.",
+      "Try once more. If the lamp still does not light, tell staff."
+     ]
+    },
+    {
+     "id": "timer",
+     "label": "Timer or door interlock not working",
+     "steps": [
+      "Note what the display shows.",
+      "Do not run the lamp with the door open or the interlock bypassed.",
+      "Label the unit \"Do not use\" and tell staff."
+     ]
+    },
+    {
+     "id": "ozone",
+     "label": "Ozone smell outside the unit",
+     "minSeverity": "blocked",
+     "steps": [
+      "Switch the unit off and keep the door closed.",
+      "Ventilate the room and step away if the smell is strong.",
+      "Tell staff now."
+     ]
+    },
+    {
+     "id": "hydro",
+     "label": "Grids not hydrophilic after cleaning",
+     "steps": [
+      "Test with a drop of water on a cleaned grid. It should spread flat.",
+      "Use grids soon after cleaning; the effect fades within hours.",
+      "Increase the cleaning time one step, then tell staff if it still fails."
+     ]
+    }
+   ],
+   "only_types": [
+    "uv"
+   ]
+  },
+  {
    "id": "hpf_ln2",
    "label": "LN2 supply or freezing pressure",
    "suggestSeverity": "degraded",
@@ -1448,6 +1504,7 @@
    "only_types": [
     "plunge",
     "coater",
+    "uv",
     "hpf",
     "pattern",
     "bench",
@@ -1536,6 +1593,7 @@
    "only_types": [
     "plunge",
     "coater",
+    "uv",
     "hpf",
     "pattern",
     "bench",
@@ -1830,6 +1888,10 @@
     "Metal sputter coating",
     "Other"
    ],
+   "uv": [
+    "Cleaning grids",
+    "Other"
+   ],
    "hpf": [
     "High-pressure freezing",
     "Training",
@@ -1889,6 +1951,7 @@
    "types": [
     "plunge",
     "coater",
+    "uv",
     "hpf",
     "pattern",
     "bench",

@@ -57,6 +57,7 @@ TYPE_TAGS = [
     ('light', {'confocal', 'airyscan', 'lsm', 'light', 'clem', 'thunder'}),
     ('hpf', {'hpf', 'cryocapcell', 'pressure', 'em-ice', 'hpm'}),
     ('plunge', {'vitrobot', 'plunge', 'gp2', 'chameleon', 'evoblot'}),
+    ('uv', {'uv', 'ozone', 'procleaner', 'uvo', 'uvozone'}),
     ('coater', {'coater', 'ace600', 'ace', 'solarus', 'plasma', 'glow',
                 'easiglow', 'sputter', 'pelco'}),
     ('pattern', {'primo', 'micropatterning', 'patterning'}),

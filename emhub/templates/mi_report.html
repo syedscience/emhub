@@ -358,13 +358,20 @@
             insts.forEach(function (i) {
                 var tile = $('<button type="button" class="tile">').attr('data-id', i.id).append(
                     $('<span class="ic">').append($('<i class="fas">').addClass(g.icon || 'fa-cube')),
-                    $('<span>').text(i.name));
+                    instName(i.name, '<span>'));
                 if (noticeInstruments[i.id]) tile.append('<span class="warn-dot" title="Service notice"></span>');
                 tiles.append(tile);
             });
         });
         markTiles();
         renderChosen();
+    }
+
+    // "Leica GP2 (ARC)": the part in brackets is shown small and grey
+    function instName(name, tag) {
+        var m = /^(.*\S)\s*\(([^()]+)\)$/.exec(name), el = $(tag);
+        if (!m) return el.text(name);
+        return el.text(m[1] + ' ').append($('<span class="paren">').text('(' + m[2] + ')'));
     }
 
     function groupOf(inst) {
@@ -382,7 +389,7 @@
         var session = selectedSession(), from = session && String(session.instrument_id) === String(inst.id);
         box.empty().append(
             $('<span class="ic">').append($('<i class="fas">').addClass(groupOf(inst).icon || 'fa-cube')),
-            $('<div class="cname">').append($('<b>').text(inst.name),
+            $('<div class="cname">').append(instName(inst.name, '<b>'),
                 $('<span>').text(from ? 'From your booking' : 'Selected')),
             $('<button type="button" class="btn-mi small" id="mi-inst-change">').text('Change'));
     }
