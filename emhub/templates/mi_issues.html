@@ -146,8 +146,17 @@
                         </select>
                     </div>
                     <div class="form-group col-6">
-                        <label for="mi-notice-expires">Show until (optional)</label>
-                        <input type="datetime-local" class="form-control" id="mi-notice-expires">
+                        <label for="mi-notice-for">Show it</label>
+                        <select class="form-control" id="mi-notice-for">
+                            <option value="">Until I remove it</option>
+                            <option value="today">Until the end of today</option>
+                            <option value="24">For 24 hours</option>
+                            <option value="72">For 3 days</option>
+                            <option value="168">For 1 week</option>
+                            <option value="date">Until a date and time...</option>
+                        </select>
+                        <input type="datetime-local" class="form-control mt-2" id="mi-notice-expires"
+                               style="display: none" aria-label="Show until">
                     </div>
                 </div>
                 <div class="alert alert-danger mb-0" id="mi-notice-error" style="display: none"></div>
@@ -166,12 +175,28 @@
         $('.modal').modal('hide'); $('.modal-backdrop').remove();
         load_main_content('mi_issues', {{ filters|tojson }});
     }
+    function localIso(d) {
+        d = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+        return d.toISOString().slice(0, 16);
+    }
+    function noticeUntil() {
+        var v = $('#mi-notice-for').val(), d = new Date();
+        if (!v) return null;
+        if (v === 'date') return $('#mi-notice-expires').val() || null;
+        if (v === 'today') { d.setHours(23, 59, 0, 0); return localIso(d); }
+        return localIso(new Date(d.getTime() + parseInt(v, 10) * 3600000));
+    }
+    $('#mi-notice-for').on('change', function () {
+        var pick = $(this).val() === 'date';
+        $('#mi-notice-expires').toggle(pick).attr('min', localIso(new Date()));
+        if (pick) $('#mi-notice-expires').trigger('focus');
+    });
     $('#mi-notice-ok').on('click', function () {
         MI.post('/notices', {
             instrument_id: $('#mi-notice-instrument').val() || null,
             message: $('#mi-notice-message').val(),
             level: $('#mi-notice-level').val(),
-            expires_at: $('#mi-notice-expires').val() || null
+            expires_at: noticeUntil()
         }, miReload, '#mi-notice-error');
     });
     $('.mi-remove-notice').on('click', function () {

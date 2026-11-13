@@ -751,6 +751,10 @@ class TestIssues(unittest.TestCase):
         notice = r.get_json()['notice']
         msgs = lambda iid: [n['message'] for n in self.client_for(self.reporter).get(
             '/api/mi/notices?instrument_id=%d' % iid).get_json()['notices']]
+        past = dict(data, expires_at=(dt.datetime.now() - dt.timedelta(hours=1)).isoformat())
+        r = self.post(self.client_for(self.manager), '/api/mi/notices', past, user=self.manager)
+        self.assertEqual(r.status_code, 422)  # would be hidden at once
+        self.assertIn('expires_at', r.get_json()['errors'])
         self.assertIn(data['message'], msgs(self.krios.id))  # everyone sees notices
         self.assertNotIn(data['message'], msgs(self.vitrobot.id))
         self.post(self.client_for(self.manager), '/api/mi/notices/%d/remove' % notice['id'], {}, user=self.manager)

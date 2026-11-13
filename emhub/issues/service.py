@@ -1175,6 +1175,10 @@ class IssuesService:
                 if expires.tzinfo is None:
                     expires = expires.replace(tzinfo=self.app.dm.timezone)
                 expires = expires.astimezone(dt.timezone.utc)
+                if expires <= utcnow():
+                    # A notice that has already expired would never be shown
+                    errors['expires_at'] = ('This time has already passed. Pick a later '
+                                            'time, or show it until you remove it.')
             except ValueError:
                 errors['expires_at'] = 'Invalid date/time.'
         if errors:
